@@ -51,10 +51,10 @@ export function validateManifest(value: unknown): ModManifest {
 }
 
 export function validateBundle(value: unknown): ModBundle {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Choose a .t3mod bundle made with the pack command.");
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Import a complete .t3mod JSON bundle returned by Create or exported from Mods.");
   const manifest = validateManifest(read(value, "manifest"));
   const code = read(value, "code");
-  if (read(value, "format") !== "t3mod/1" || typeof code !== "string" || !code.trim()) throw new Error("Choose a .t3mod bundle made with the pack command.");
+  if (read(value, "format") !== "t3mod/1" || typeof code !== "string" || !code.trim()) throw new Error("This file needs format t3mod/1 and its complete JavaScript code. Ask your AI to return the full bundle, not a CLI plugin or source file.");
   if (new TextEncoder().encode(JSON.stringify(value)).length > MAX_BUNDLE_BYTES) throw new Error("A mod bundle must be smaller than 1 MB.");
   return { format: "t3mod/1", manifest, code };
 }

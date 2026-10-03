@@ -18,7 +18,7 @@ function harness() {
   const location = { protocol: "t3code:", hostname: "app", pathname: "/local/thread-a", href: "t3code://app/local/thread-a" };
   let context;
   const window = { WebSocket: Socket, IDBObjectStore: Store }; window.top = window;
-  context = vm.createContext({ window, location, URL, console, TextDecoder, Uint8Array, ArrayBuffer, require: () => ({ contextBridge: {
+  context = vm.createContext({ window, location, URL, console, TextEncoder, TextDecoder, Uint8Array, ArrayBuffer, structuredClone, require: () => ({ contextBridge: {
     executeInMainWorld: ({ func }) => vm.runInContext(`(${func.toString()})()`, context),
   } }) });
   vm.runInContext(source, context);
@@ -28,6 +28,42 @@ function harness() {
 async function send(socket, value) { socket.receive(value); await new Promise(resolve => setTimeout(resolve, 0)); }
 const activity = (usedTokens, turnId = "turn-a", maxTokens = 200000, time = "2026-10-03T10:00:00Z") => ({ kind: "context-window.updated", turnId, createdAt: time, payload: { usedTokens, maxTokens, privateField: "never forwarded" } });
 const update = a => ({ _tag: "Chunk", values: [{ kind: "event", event: { type: "thread.activity-appended", payload: { threadId: "thread-a", activity: a } } }] });
+
+test("complete native assistant bundles reach the host without a rendered code block", async () => {
+  const { window, socket } = harness();
+  const bundle = { format: "t3mod/1", manifest: { id: "custom-mod" }, code: 'globalThis.T3Mod={activate(){}};' };
+  const message = { id: "reply-a", threadId: "thread-a", role: "assistant", streaming: false, text: "Created it.\n```t3mod\n" + JSON.stringify(bundle) + "\n```\nReady to install." };
+  const events = [];
+  const unsubscribe = window.__T3_MODS_ARTIFACTS__.subscribe(value => events.push(value));
+  const sendMessage = payload => send(socket, { event: { type: "message.updated", payload } });
+  await sendMessage({ ...message, streaming: true });
+  await sendMessage({ ...message, role: "user" });
+  assert.equal(events.length, 0);
+  await sendMessage({ ...message, text: message.text.split("\n```\n")[0] });
+  assert.match(events[0].error, /incomplete/);
+  events.length = 0;
+  await sendMessage(message);
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0], { threadId: "thread-a", messageId: "reply-a", bundle });
+  assert.equal("text" in events[0], false);
+  await sendMessage(message);
+  assert.equal(events.length, 1);
+  const copy = window.__T3_MODS_ARTIFACTS__.get(); copy[0].bundle.code = "changed";
+  assert.equal(window.__T3_MODS_ARTIFACTS__.get()[0].bundle.code, bundle.code);
+  await send(socket, { projection: { thread: { id: "thread-b" }, nodes: [], messages: [{ ...message, id: "reply-b", threadId: "thread-b" }] } });
+  assert.equal(events.length, 2);
+  await sendMessage({ ...message, id: "invalid-reply", text: '```t3mod\n{"format":"t3mod/1","code":"bad "escaping""}\n```' });
+  assert.equal(events.length, 3);
+  assert.match(events.at(-1).error, /invalid mod JSON/);
+  assert.equal(events.at(-1).bundle, null);
+  const paired = { ...message, id: "paired-reply", text: '```t3mod-manifest\n' + JSON.stringify(bundle.manifest) + '\n```\n```t3mod-code\n' + bundle.code + '\n```' };
+  await sendMessage(paired);
+  assert.equal(events.length, 4);
+  assert.deepEqual(events.at(-1).bundle, bundle);
+  await sendMessage({ ...paired, id: "incomplete-pair", text: paired.text.split('```t3mod-code')[0] });
+  assert.match(events.at(-1).error, /same reply/);
+  unsubscribe();
+});
 
 test("observe normalized measurements and completion without changing websocket behavior", async () => {
   const { window, socket, Socket } = harness(); const events = [];

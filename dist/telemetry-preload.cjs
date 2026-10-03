@@ -8,10 +8,76 @@ function installTelemetry() {
   const listeners = /* @__PURE__ */ new Set();
   const nodes = /* @__PURE__ */ new Map();
   const providerThreads = /* @__PURE__ */ new Map();
+  const artifacts = /* @__PURE__ */ new Map();
+  const artifactListeners = /* @__PURE__ */ new Set();
   const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
   const id = (value) => typeof value === "string" && value.length > 0 && value.length <= 300;
   const firstKey = (map) => map.keys().next().value;
   const timestamp = (value) => typeof value === "string" ? Date.parse(value) : 0;
+  function message(input) {
+    const value = object(input);
+    if (value.role !== "assistant" || value.streaming !== false || !id(value.id) || !id(value.threadId) || typeof value.text !== "string" || value.text.length > 2 * 1024 * 1024 || !(/(?:^|\n) {0,3}(?:`{3,}|~{3,})t3mod(?:-manifest|-code)?[ \t]*(?:\r?\n|$)/.test(value.text) || value.text.includes('"t3mod/1"'))) return;
+    const found = [];
+    const failed = (error) => found.push({ threadId: value.threadId, messageId: value.id, bundle: null, error });
+    let manifestText;
+    let codeText;
+    let duplicate = false;
+    const lines = value.text.split(/\r?\n/);
+    for (let i = 0; i < lines.length && found.length < 5; i++) {
+      const opening = /^ {0,3}(`{3,}|~{3,})(t3mod(?:-manifest|-code)?|json)?[ \t]*$/.exec(lines[i]);
+      if (!opening) continue;
+      const start = ++i;
+      const closing = new RegExp("^ {0,3}" + opening[1][0] + "{" + opening[1].length + ",}[ \\t]*$");
+      while (i < lines.length && !closing.test(lines[i])) i++;
+      if (i === lines.length) {
+        if (opening[2]?.startsWith("t3mod")) failed("Your AI left the mod response incomplete. Ask it to finish and close each mod code block.");
+        break;
+      }
+      const text = lines.slice(start, i).join("\n");
+      if (new TextEncoder().encode(text).length > 1024 * 1024) {
+        failed("The generated mod exceeds 1 MB. Ask your AI for a smaller bundle.");
+        continue;
+      }
+      if (opening[2] === "t3mod-manifest") {
+        duplicate ||= manifestText !== void 0;
+        manifestText = text;
+        continue;
+      }
+      if (opening[2] === "t3mod-code") {
+        duplicate ||= codeText !== void 0;
+        codeText = text;
+        continue;
+      }
+      try {
+        const bundle = object(JSON.parse(text));
+        if (bundle.format !== "t3mod/1" && opening[2] !== "t3mod") continue;
+        found.push({ threadId: value.threadId, messageId: value.id, bundle });
+      } catch {
+        if (opening[2] === "t3mod" || text.includes('"t3mod/1"')) failed("Your AI returned invalid mod JSON. Ask it to return one complete t3mod bundle, with the JavaScript escaped as a JSON string.");
+      }
+    }
+    if (manifestText !== void 0 || codeText !== void 0) {
+      if (duplicate || manifestText === void 0 || codeText === void 0) failed("Ask your AI to return exactly one t3mod-manifest block and one t3mod-code block in the same reply.");
+      else try {
+        const bundle = { format: "t3mod/1", manifest: JSON.parse(manifestText), code: codeText };
+        if (new TextEncoder().encode(JSON.stringify(bundle)).length > 1024 * 1024) failed("The generated mod exceeds 1 MB. Ask your AI for a smaller bundle.");
+        else found.push({ threadId: value.threadId, messageId: value.id, bundle });
+      } catch {
+        failed("Your AI returned an invalid mod manifest. Ask it to correct the JSON in the t3mod-manifest block.");
+      }
+    }
+    const key = value.threadId + ":" + value.id;
+    if (!found.length || JSON.stringify(artifacts.get(key)) === JSON.stringify(found)) return;
+    artifacts.delete(key);
+    artifacts.set(key, found);
+    while (artifacts.size > 20) artifacts.delete(firstKey(artifacts));
+    for (const artifact of found) for (const listener of artifactListeners) {
+      try {
+        listener(structuredClone(artifact));
+      } catch {
+      }
+    }
+  }
   function emit(name, value) {
     for (const listener of listeners) {
       try {
@@ -96,6 +162,7 @@ function installTelemetry() {
     const value = object(input);
     if (!id(object(value.thread).id) || !Array.isArray(value.nodes)) return;
     for (const item of value.nodes) node(item);
+    if (Array.isArray(value.messages)) for (const item of value.messages.slice(-20)) message(item);
     if (Array.isArray(value.providerThreads)) for (const item of value.providerThreads) providerThread(item);
     if (Array.isArray(value.providerTurns)) {
       for (const item of [...value.providerTurns].sort((a, b) => timestamp(object(object(a).tokenUsage).updatedAt ?? object(a).completedAt ?? object(a).startedAt) - timestamp(object(object(b).tokenUsage).updatedAt ?? object(b).completedAt ?? object(b).startedAt))) providerTurn(item, object(value.thread).id);
@@ -114,6 +181,7 @@ function installTelemetry() {
     else if (value.type === "node.updated") node(value.payload);
     else if (value.type === "provider-thread.updated") providerThread(value.payload);
     else if (value.type === "provider-turn.updated") providerTurn(value.payload, value.threadId);
+    else if (value.type === "message.updated") message(value.payload);
     else if (value.kind === "thread-upserted") thread(value.thread);
     else if (value.kind === "thread-removed") {
       if (id(value.threadId)) {
@@ -226,6 +294,16 @@ function installTelemetry() {
       return result;
     };
   }
+  Object.defineProperty(window, "__T3_MODS_ARTIFACTS__", { value: Object.freeze({
+    get() {
+      return structuredClone([...artifacts.values()].flat());
+    },
+    subscribe(listener) {
+      if (typeof listener !== "function") throw new TypeError("Expected a listener.");
+      artifactListeners.add(listener);
+      return () => artifactListeners.delete(listener);
+    }
+  }) });
   Object.defineProperty(window, "__T3_MODS_TELEMETRY__", { value: Object.freeze({
     get(pathname = (location.hash?.startsWith("#/") ? location.hash.slice(1) : location.pathname).split(/[?#]/, 1)[0]) {
       const segments = String(pathname).split("/").filter(Boolean);

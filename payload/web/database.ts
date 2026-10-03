@@ -1,9 +1,14 @@
-import type { Json, ModRecord } from "../../sdk.d.ts";
+import type { Json, ModBundle, ModRecord } from "../../sdk.d.ts";
 
 const DB_NAME = "mods-for-t3-code-v1";
 type StoreName = "mods" | "data" | "settings";
 type JsonObject = { [key: string]: Json };
 let opening: Promise<IDBDatabase> | undefined;
+/** Where a bundle waiting for review came from. */
+export type PendingSource = "chat" | "inbox" | "file" | "paste";
+/** A bundle that arrived but has not been installed or dismissed yet. Re-validated on load. */
+export interface PendingRecord { bundle: ModBundle; hash: string; source: PendingSource; receivedAt: number; threadId?: string; messageId?: string }
+type SettingValue = boolean | { [key: string]: number } | readonly PendingRecord[];
 
 function open(): Promise<IDBDatabase> {
   opening ??= new Promise((resolve, reject) => {
@@ -64,7 +69,7 @@ export const database = {
   getSetting(key: string): Promise<unknown> {
     return operation<unknown>("settings", "readonly", (store) => store.get(key) as IDBRequest<unknown>);
   },
-  setSetting(key: string, value: boolean | { [key: string]: number }): Promise<void> {
+  setSetting(key: string, value: SettingValue): Promise<void> {
     return operation("settings", "readwrite", (store) => store.put(value, key)).then(() => undefined);
   },
 };

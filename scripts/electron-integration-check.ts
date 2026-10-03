@@ -12,7 +12,7 @@ try {
   await mkdir(path.join(directory, "inbox"));
   for (const file of ["bootstrap.cjs", "telemetry-preload.cjs", "renderer.js", "examples.json"]) await copyFile(fileURLToPath(new URL("../dist/" + file, import.meta.url)), path.join(directory, file));
   await writeFile(path.join(directory, "paths.cjs"), "exports.dataRoot=" + JSON.stringify(directory) + ";");
-  await writeFile(path.join(directory, "native.cjs"), "require('electron').contextBridge.exposeInMainWorld('__nativePreload',true);");
+  await writeFile(path.join(directory, "native.cjs"), "const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('__nativePreload',true);contextBridge.exposeInMainWorld('__fixtureRemount',()=>ipcRenderer.invoke('fixture-remount'));");
   await writeFile(path.join(directory, "package.json"), JSON.stringify({main: "main.cjs"}));
   await copyFile(fileURLToPath(new URL("../test/electron-integration.cjs", import.meta.url)), path.join(directory, "main.cjs"));
   await copyFile(fileURLToPath(new URL("../test/electron-composer.html", import.meta.url)), path.join(directory, "composer.html"));

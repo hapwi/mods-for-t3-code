@@ -21,6 +21,9 @@
 
 ### Fixed
 
+- Deliver custom mods from completed native AI replies and cached projections without requiring visible chat blocks or local files; accept separate manifest/code blocks, persist pending reviews, deduplicate deliveries, and show validation errors with an AI repair action.
+- Show installed built-ins and accurate Starting, Active, Stopped, Off, Paused, and Safe mode states; add live toggles, retry actions, and file-or-paste import while preserving drafts and reviews across manager navigation.
+- Apply theme mods to T3's native chrome, selected-theme sources, and sidebar overrides; restore previous inline colors and priorities when disabled.
 - Fix Token Weather and Settings in Electron by following hash routes; dock the forecast beside native composer attachments without the large gap. Verify forecasts, thread switching, warm-cache usage and live cleanup in an isolated Electron 44.4.2 window.
 - Review AI-created mods returned as complete `t3mod` JSON blocks in the thread so remote workspaces can reach the local installation flow; ignore incomplete and previously reviewed bundles.
 - Start mods immediately after confirmed installation, simplify Import labels and row actions, and keep composer bands compact and outside T3’s input surface. Teach the authoring prompt T3’s supported surfaces, theme conventions, and live lifecycle.

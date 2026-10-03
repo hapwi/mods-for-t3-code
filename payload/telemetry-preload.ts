@@ -1,5 +1,5 @@
 import type { UsageSnapshot } from "../sdk.d.ts";
-import type { TelemetryEvent } from "./telemetry-types.ts";
+import type { TelemetryEvent, ModArtifact } from "./telemetry-types.ts";
 import type { ElectronApi } from "./electron-types.ts";
 
 // Trusted, read-only adapter. Runs before T3's original preload, without replacing
@@ -11,11 +11,55 @@ function installTelemetry() {
   const listeners = new Set<(event: TelemetryEvent) => void>();
   const nodes = new Map<string, {threadId: string; root: boolean}>();
   const providerThreads = new Map<string, string>();
+  const artifacts = new Map<string, ModArtifact[]>();
+  const artifactListeners = new Set<(artifact: ModArtifact) => void>();
   type ObjectValue = Record<string, unknown>;
   const object = (value: unknown): ObjectValue => value !== null && typeof value === "object" && !Array.isArray(value) ? value as ObjectValue : {};
   const id = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 300;
   const firstKey = <V>(map: Map<string, V>): string => map.keys().next().value!;
   const timestamp = (value: unknown): number => typeof value === "string" ? Date.parse(value) : 0;
+  function message(input: unknown) {
+    const value = object(input);
+    // Observe complete native assistant messages, including virtualized replies.
+    // Never expose message text, tools, user prompts or partial streaming output.
+    if (value.role !== "assistant" || value.streaming !== false || !id(value.id) || !id(value.threadId) || typeof value.text !== "string" || value.text.length > 2 * 1024 * 1024 || !(/(?:^|\n) {0,3}(?:`{3,}|~{3,})t3mod(?:-manifest|-code)?[ \t]*(?:\r?\n|$)/.test(value.text) || value.text.includes('"t3mod/1"'))) return;
+    const found: ModArtifact[] = [];
+    const failed = (error: string) => found.push({ threadId: value.threadId as string, messageId: value.id as string, bundle: null, error });
+    let manifestText: string | undefined;
+    let codeText: string | undefined;
+    let duplicate = false;
+    const lines = value.text.split(/\r?\n/);
+    for (let i = 0; i < lines.length && found.length < 5; i++) {
+      const opening = /^ {0,3}(`{3,}|~{3,})(t3mod(?:-manifest|-code)?|json)?[ \t]*$/.exec(lines[i]);
+      if (!opening) continue;
+      const start = ++i;
+      const closing = new RegExp("^ {0,3}" + opening[1][0] + "{" + opening[1].length + ",}[ \\t]*$");
+      while (i < lines.length && !closing.test(lines[i])) i++;
+      if (i === lines.length) { if (opening[2]?.startsWith("t3mod")) failed("Your AI left the mod response incomplete. Ask it to finish and close each mod code block."); break; }
+      const text = lines.slice(start, i).join("\n");
+      if (new TextEncoder().encode(text).length > 1024 * 1024) { failed("The generated mod exceeds 1 MB. Ask your AI for a smaller bundle."); continue; }
+      if (opening[2] === "t3mod-manifest") { duplicate ||= manifestText !== undefined; manifestText = text; continue; }
+      if (opening[2] === "t3mod-code") { duplicate ||= codeText !== undefined; codeText = text; continue; }
+      try {
+        const bundle = object(JSON.parse(text));
+        if (bundle.format !== "t3mod/1" && opening[2] !== "t3mod") continue;
+        found.push({ threadId: value.threadId, messageId: value.id, bundle });
+      } catch { if (opening[2] === "t3mod" || text.includes('"t3mod/1"')) failed("Your AI returned invalid mod JSON. Ask it to return one complete t3mod bundle, with the JavaScript escaped as a JSON string."); }
+    }
+    if (manifestText !== undefined || codeText !== undefined) {
+      if (duplicate || manifestText === undefined || codeText === undefined) failed("Ask your AI to return exactly one t3mod-manifest block and one t3mod-code block in the same reply.");
+      else try {
+        const bundle = { format: "t3mod/1", manifest: JSON.parse(manifestText) as unknown, code: codeText };
+        if (new TextEncoder().encode(JSON.stringify(bundle)).length > 1024 * 1024) failed("The generated mod exceeds 1 MB. Ask your AI for a smaller bundle.");
+        else found.push({ threadId: value.threadId, messageId: value.id, bundle });
+      } catch { failed("Your AI returned an invalid mod manifest. Ask it to correct the JSON in the t3mod-manifest block."); }
+    }
+    const key = value.threadId + ":" + value.id;
+    if (!found.length || JSON.stringify(artifacts.get(key)) === JSON.stringify(found)) return;
+    artifacts.delete(key); artifacts.set(key, found);
+    while (artifacts.size > 20) artifacts.delete(firstKey(artifacts));
+    for (const artifact of found) for (const listener of artifactListeners) { try { listener(structuredClone(artifact)); } catch {} }
+  }
   function emit(name: TelemetryEvent["name"], value: UsageSnapshot) {
     for (const listener of listeners) { try { listener({ name, value: { ...value } }); } catch {} }
   }
@@ -91,6 +135,7 @@ function installTelemetry() {
     const value = object(input);
     if (!id(object(value.thread).id) || !Array.isArray(value.nodes)) return;
     for (const item of value.nodes) node(item);
+    if (Array.isArray(value.messages)) for (const item of value.messages.slice(-20)) message(item);
     if (Array.isArray(value.providerThreads)) for (const item of value.providerThreads) providerThread(item);
     if (Array.isArray(value.providerTurns)) {
       // Old turns can update the bounded cache, but the current report wins.
@@ -107,6 +152,7 @@ function installTelemetry() {
     else if (value.type === "node.updated") node(value.payload);
     else if (value.type === "provider-thread.updated") providerThread(value.payload);
     else if (value.type === "provider-turn.updated") providerTurn(value.payload, value.threadId);
+    else if (value.type === "message.updated") message(value.payload);
     else if (value.kind === "thread-upserted") thread(value.thread);
     else if (value.kind === "thread-removed") { if (id(value.threadId)) { snapshots.delete(value.threadId); completed.delete(value.threadId); } }
     // Explicit RPC and snapshot envelopes only. Ignore prompt/tool/auth payloads.
@@ -203,6 +249,13 @@ function installTelemetry() {
       return result;
     };
   }
+  Object.defineProperty(window, "__T3_MODS_ARTIFACTS__", { value: Object.freeze({
+    get() { return structuredClone([...artifacts.values()].flat()); },
+    subscribe(listener: (artifact: ModArtifact) => void) {
+      if (typeof listener !== "function") throw new TypeError("Expected a listener.");
+      artifactListeners.add(listener); return () => artifactListeners.delete(listener);
+    },
+  }) });
   Object.defineProperty(window, "__T3_MODS_TELEMETRY__", { value: Object.freeze({
     get(pathname: string = (location.hash?.startsWith("#/") ? location.hash.slice(1) : location.pathname).split(/[?#]/, 1)[0]) {
       const segments = String(pathname).split("/").filter(Boolean);

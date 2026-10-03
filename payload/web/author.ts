@@ -4,23 +4,38 @@ export function authorPrompt(description: string, inbox?: string): string {
 
 What I want: ${description}
 
-Use my existing T3 provider session. Produce one self-contained .t3mod JSON bundle.
-Do not change T3 itself. Nothing runs until I review it in the Mods manager and choose Install.
+Use my existing T3 provider session. Do not change T3 itself. Nothing runs until I review the mod in the Mods manager and choose Install.
 
-How to hand the bundle back — do both:
-- Save the JSON file to ${destination}/<id>.t3mod when that folder is writable.
-- Put the same complete JSON in exactly one fenced code block tagged t3mod in your reply. The Mods host reads that rendered block in this window. The provider may be running on another computer, so a file written only on that machine never reaches this inbox. The code block is what makes the mod show up for review. Do not split the JSON, add prose inside the block, or tag it as json or markdown. The block text must be complete JSON beginning with {"format":"t3mod/1" and must stay under 1 MB. Incomplete or invalid JSON is ignored. Repeating a bundle I already installed or dismissed does not open another review.
+How to hand the mod back:
+Your finished reply must contain exactly two fenced code blocks, in this order, with nothing else inside them:
+
+\`\`\`t3mod-manifest
+{"apiVersion":1,"id":"lowercase-mod-id","version":"1.0.0","name":"Readable name","description":"What it does","author":"AI assisted","permissions":[]}
+\`\`\`
+
+\`\`\`t3mod-code
+globalThis.T3Mod = {
+  async activate(api) {
+    // implementation
+  },
+};
+\`\`\`
+
+- t3mod-manifest holds only the manifest as raw JSON.
+- t3mod-code holds the complete raw JavaScript, not a JSON string, so do not escape quotes or newlines. Never put a line of three backticks inside it.
+- Use these exact tags. Do not tag the blocks json, js, or markdown, and do not split the code across blocks. Manifest and code together must stay under 1 MB.
+- T3 reads both blocks from your finished reply and lists the mod in the Mods manager under Waiting for review, even when you run on another computer. If something does not validate, the manager shows me the reason. A mod I already installed or dismissed does not ask again.
+- Optional: if ${destination} is a folder on this computer that you can write to, also save the complete bundle there as <id>.t3mod, a JSON file of the form {"format":"t3mod/1","manifest":{…},"code":"…"} with the same manifest and code. Skip this when you cannot write there; the two blocks are what count.
+- When I ask for changes later, send both blocks again with the same id and a higher version. The update replaces the older one waiting for review, and installing it replaces the running version.
 
 T3 integration and design contract:
-This is a mod inside the existing T3 Code Electron app. T3 already owns the sidebar, Settings, thread list, conversation, composer, provider picker, and attachment drawer. Use the supported host surfaces below; do not rebuild T3, inject an overlay, invent DOM selectors, or assume a Claude Code terminal plugin API. Mods are workers, so document/window/React and T3's internal stores are unavailable. The host places and styles your output to match the current T3 theme.
+This is a mod inside the existing T3 Code Electron app, written for the Mods for T3 Code API below. It is not a Claude Code plugin or Claude Code mod: T3 runs Claude through the Agent SDK, which does not render Claude Code mod UI inside T3. Do not use the plugin-authoring skill, plugin.json, hooks.json, register.js, register(), on(), ui.render, $.ui, tool.call or tool.check hooks, or any other Claude Code mods API, and do not write files under ~/.claude. T3 already owns the sidebar, Settings, thread list, conversation, composer, provider picker, and attachment drawer. Use the supported host surfaces below; do not rebuild T3, inject an overlay, invent DOM selectors, or assume a Claude Code terminal plugin API. Mods are workers, so document/window/React and T3's internal stores are unavailable. The host places and styles your output to match the current T3 theme.
 For a compact live indicator above the prompt use ui.band, with short plain text and semantic tones. Do not add a title panel or a second composer for a one-line indicator. For interactive actions use ui.panels or ui.commands. For themes use paired ui.theme tokens, including sidebar tokens when needed, instead of CSS or hardcoded layout. Keep labels concise, avoid decorative headings and redundant controls, and let the host choose fonts, spacing, borders, and light/dark colors.
 Install starts the mod immediately after permission review. It must work without restarting T3, update while the app stays open, and clean up its own timers when disabled. Treat navigation as a change of thread: do not display a previous thread's measurements on the next thread. Cache history by threadId, deduplicate completed turns by turnId, and preserve it with storage only if requested.
 Context measurements come from T3's actual provider-turn reports and cached thread projections. They are context-window usage, not subscription limits, cumulative billing totals, or a text-length estimate. A provider may return no measurement yet, and maxTokens may be unknown. Handle both states with a short muted message; never guess a 200k window, percentage, turn delta, or chart sample. Do not infer a token count from the model's name. Subscribe to both session.usage and turn.complete, and read api.session.usage() on activation. A completed turn may receive a corrected measurement later. Live indicators should render real data as soon as it arrives.
 
-Bundle format:
-{"format":"t3mod/1","manifest":{"apiVersion":1,"id":"lowercase-mod-id","version":"1.0.0","name":"Readable name","description":"What it does","author":"AI assisted","permissions":[]},"code":"globalThis.T3Mod = { async activate(api) { /* implementation */ } };"}
-
-The code string is complete JavaScript, runs in an isolated browser worker, and must set globalThis.T3Mod.activate. No imports, DOM, Node, filesystem, network, credentials, tool approval, or model calls are available. Declare only the permissions you need:
+Mod code:
+The t3mod-code block is complete JavaScript, runs in an isolated browser worker, and must set globalThis.T3Mod.activate. No imports, DOM, Node, filesystem, network, credentials, tool approval, or model calls are available. A mod cannot intercept, block, rewrite, or approve tool calls, prompts, permission requests, or model requests, and it cannot replace T3's own interface; only the surfaces listed below exist. Declare only the permissions you need:
 - ui.panels: api.panels.set({title,body,actions:[{id,label}]}), api.panels.clear(), api.panels.action(id, async () => {}). One text panel per mod.
 - ui.commands: await api.commands.register({id,title}, async () => {}). Commands run locally when I click them.
 - ui.notify: await api.notify("message").
@@ -34,5 +49,13 @@ The code string is complete JavaScript, runs in an isolated browser worker, and 
 - api.log("message") is always available.
 activate may return a cleanup function. All actions should finish within 5 seconds. Timers are fine. Long loops cause quarantine. Never request permissions outside this list.
 
-Before you answer, check the JavaScript syntax and JSON escaping without executing host API calls outside T3. Walk through activation, missing data, unknown window size, navigation, repeated completion events, disable, and re-enable. Do not claim a live T3 check you did not perform. The saved file and the t3mod block are raw JSON, not markdown. After the block, tell me what the mod does and which permissions to review.`;
+Before you answer, check the JavaScript syntax and that the manifest is valid JSON, without executing host API calls outside T3. Walk through activation, missing data, unknown window size, navigation, repeated completion events, disable, and re-enable. Do not claim a live T3 check you did not perform. After the two blocks, tell me in plain words what the mod does and which permissions to review.`;
+}
+
+// Asks the same chat for a corrected bundle when one fails validation or stops while running.
+export function fixPrompt(name: string, id: string | undefined, version: string | undefined, problem: string): string {
+  const target = id ? `"${name}" (id ${id}${version ? `, version ${version}` : ""})` : `"${name}"`;
+  return `The Mods for T3 Code mod ${target} needs a fix: ${problem}
+
+Fix the cause and send the complete corrected mod again as two fenced code blocks: one tagged t3mod-manifest with only the manifest JSON (the same id${id ? "" : " as before"} and a higher version), and one tagged t3mod-code with the complete raw JavaScript, not a JSON string. Keep to the Mods for T3 Code API and permission list from the original request; do not use Claude Code plugin APIs. Check the JavaScript syntax and that the manifest is valid JSON before you answer, then tell me what you changed.`;
 }
