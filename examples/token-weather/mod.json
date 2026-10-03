@@ -5,6 +5,10 @@
   "name": "Token weather",
   "description": "A one-line forecast above the composer: measured context use for the open thread, a sparkline of recent completed turns, and the last turn’s change.",
   "author": "Mods for T3 Code",
-  "permissions": ["ui.band", "session.usage", "storage"],
-  "entry": "mod.js"
+  "permissions": [
+    "ui.band",
+    "session.usage",
+    "storage"
+  ],
+  "entry": "mod.ts"
 }

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertPermission, validateBundle, validatePanel, validateBand, usageSnapshot } from "../payload/web/manifest.js";
+import { assertPermission, validateBundle, validatePanel, validateBand, usageSnapshot } from "../payload/web/manifest.ts";
 const manifest = { apiVersion: 1, id: "test-mod", version: "1.0.0", name: "Test", description: "Test mod", author: "Tester", permissions: ["ui.panels"] };
 const bundle = { format: "t3mod/1", manifest, code: "globalThis.T3Mod={activate(){}};" };
 

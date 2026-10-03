@@ -15,8 +15,14 @@
 - Record the published Linux curl installer and isolated Electron telemetry checks, and clarify native platform discovery guidance.
 - Include the license notices for dependencies bundled into the Windows resource helper.
 
+### Changed
+
+- Convert production code, example mods, the SDK and development scripts to strict TypeScript; ship the compiled CLI at `dist/cli.mjs` so end-user installation needs no compiler or npm dependencies.
+
 ### Fixed
 
+- Fix Token Weather and Settings in Electron by following hash routes; dock the forecast beside native composer attachments without the large gap. Verify forecasts, thread switching, warm-cache usage and live cleanup in an isolated Electron 44.4.2 window.
+- Review AI-created mods returned as complete `t3mod` JSON blocks in the thread so remote workspaces can reach the local installation flow; ignore incomplete and previously reviewed bundles.
 - Start mods immediately after confirmed installation, simplify Import labels and row actions, and keep composer bands compact and outside T3’s input surface. Teach the authoring prompt T3’s supported surfaces, theme conventions, and live lifecycle.
 - Read measured context from T3’s warm thread-cache hydration and successful RPC snapshots; keep tool items from evicting root ownership in long threads.
 

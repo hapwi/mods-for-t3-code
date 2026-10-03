@@ -5,6 +5,9 @@
   "name": "Prompt kit",
   "description": "Local commands that offer useful review and debugging prompts for your current T3 draft. Every insertion asks first.",
   "author": "Mods for T3 Code",
-  "permissions": ["ui.commands", "draft.insert"],
-  "entry": "mod.js"
+  "permissions": [
+    "ui.commands",
+    "draft.insert"
+  ],
+  "entry": "mod.ts"
 }

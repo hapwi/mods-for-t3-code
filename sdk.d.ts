@@ -11,6 +11,38 @@ export interface ModManifest {
   permissions: Permission[];
   entry?: string;
 }
+/** Packed mod. `code` is the isolated worker program. */
+export interface ModBundle {
+  format: "t3mod/1";
+  manifest: ModManifest;
+  code: string;
+}
+/** Bundle stored by the host, plus whether it is allowed to run. */
+export interface ModRecord extends ModBundle {
+  enabled: boolean;
+  /** Fault text when the host stopped the mod, otherwise null. */
+  quarantined: string | null;
+  /** Set for an inbox or rendered-block delivery until the review is remembered. */
+  inboxHash?: string;
+}
+/** Calls the worker may make. Arguments and results are JSON values. */
+export type ModMethod =
+  | "events.subscribe"
+  | "commands.register"
+  | "panels.set"
+  | "panels.clear"
+  | "notify"
+  | "theme.set"
+  | "theme.clear"
+  | "band.set"
+  | "band.clear"
+  | "session.usage"
+  | "route.get"
+  | "draft.read"
+  | "draft.insert"
+  | "storage.get"
+  | "storage.set"
+  | "log";
 export type BandTone = "default" | "muted" | "yellow" | "cyan" | "blue" | "magenta" | "red";
 /** Plain single-line text. 1–16 parts, up to 160 characters each and 300 in total. No HTML. */
 export interface BandPart { text: string; tone?: BandTone }
@@ -27,7 +59,8 @@ export interface UsageSnapshot {
   complete: boolean;
 }
 export interface ModApi {
-  on(event: "app.route" | "draft.change", handler: (value: string) => void | Promise<void>): () => void;
+  on(event: "app.route", handler: (value: string) => void | Promise<void>): () => void;
+  on(event: "draft.change", handler: (value: string) => void | Promise<void>): () => void;
   /** Requires session.usage. Fires for new measurements and on navigation; null when the open view has none. */
   on(event: "session.usage", handler: (value: UsageSnapshot | null) => void | Promise<void>): () => void;
   /** Requires session.usage. Can repeat for the same turnId when a later final measurement arrives. */

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 
-const source = await readFile(new URL("../payload/telemetry-preload.cjs", import.meta.url), "utf8");
+const source = await readFile(new URL("../dist/telemetry-preload.cjs", import.meta.url), "utf8");
 function harness() {
   class Store {
     constructor(name = "thread", database = "t3code:connection-runtime") { this.name = name; this.transaction = { db: { name: database } }; }
@@ -23,7 +23,7 @@ function harness() {
   } }) });
   vm.runInContext(source, context);
   const socket = new window.WebSocket("ws://localhost/api/ws");
-  return { window, socket, Socket, Store };
+  return { window, socket, Socket, Store, location };
 }
 async function send(socket, value) { socket.receive(value); await new Promise(resolve => setTimeout(resolve, 0)); }
 const activity = (usedTokens, turnId = "turn-a", maxTokens = 200000, time = "2026-10-03T10:00:00Z") => ({ kind: "context-window.updated", turnId, createdAt: time, payload: { usedTokens, maxTokens, privateField: "never forwarded" } });
@@ -107,4 +107,16 @@ test("unary RPC success snapshots are observed without inspecting failure data",
   await send(socket, { _tag: "Exit", exit: { _tag: "Success", value } });
   assert.equal(window.__T3_MODS_TELEMETRY__.get().usedTokens, 89260);
   assert.equal(window.__T3_MODS_TELEMETRY__.get().maxTokens, null);
+});
+
+
+test("Electron hash routes resolve the active thread and ignore Settings/query suffixes", async () => {
+  const { window, socket, location } = harness();
+  location.pathname = "/"; location.hash = "#/local/thread-a?tab=chat";
+  await send(socket, update(activity(134400)));
+  assert.equal(window.__T3_MODS_TELEMETRY__.get().usedTokens, 134400);
+  location.hash = "#/local/thread-b";
+  assert.equal(window.__T3_MODS_TELEMETRY__.get(), null);
+  location.hash = "#/settings/appearance";
+  assert.equal(window.__T3_MODS_TELEMETRY__.get(), null);
 });

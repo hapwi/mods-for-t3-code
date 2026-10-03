@@ -4,11 +4,11 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createPackageWithOptions } from "@electron/asar";
-import { readEntry, sha256 } from "../src/archive.mjs";
+import { readEntry, sha256 } from "../src/archive.ts";
 
 const dataRoot = await mkdtemp(path.join(tmpdir(), "t3-mods-data-"));
 process.env.MODS_FOR_T3_DATA = dataRoot;
-const { patchArchive, restoreArchive, exists, removeStaleOwnedCopy } = await import("../src/install.mjs");
+const { patchArchive, restoreArchive, exists, removeStaleOwnedCopy } = await import("../src/install.ts");
 const marker = "/* mods-for-t3-code:v1 */";
 const appImageCopyName = /^app(?:-[a-f0-9]{16})?$/;
 const managedCopyName = /^managed-(darwin|win32)-[a-f0-9]{16}(?:\.app)?$/;

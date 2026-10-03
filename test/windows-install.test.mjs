@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createPackageWithOptions } from "@electron/asar";
 import { NtExecutable, NtExecutableResource } from "resedit";
-import { readEntry, sha256 } from "../src/archive.mjs";
+import { readEntry, sha256 } from "../src/archive.ts";
 
 const dataRoot = await mkdtemp(path.join(tmpdir(), "t3-mods-win-"));
 process.env.MODS_FOR_T3_DATA = dataRoot;
@@ -19,8 +19,8 @@ const {
   uninstallWindowsApp,
   windowsInstallPlan,
   windowsRestorePlan,
-} = await import("../src/windows-install.mjs");
-const { patchArchive } = await import("../src/install.mjs");
+} = await import("../src/windows-install.ts");
+const { patchArchive } = await import("../src/install.ts");
 const marker = "/* mods-for-t3-code:v1 */";
 const win = { hostPlatform: "win32" };
 

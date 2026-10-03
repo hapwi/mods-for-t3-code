@@ -3,7 +3,7 @@
 <body><aside><strong>T3 Code fixture</strong><div data-sidebar="content"><ul data-sidebar="menu"><li><button onclick="history.pushState({},'', '/settings/appearance')">Appearance settings</button></li></ul></div><footer data-sidebar="footer"><ul data-sidebar="menu"><li>Settings</li></ul></footer></aside>
 <div data-slot="sidebar-inset"><div><main><h1>A small mod, inside your app.</h1><p>This is a focused integration fixture with T3’s sidebar and composer selectors and its relevant CSP. It uses the actual mod host, manager, worker sandbox, and installation flow. Context measurements here are simulated.</p><button id="sample">Review focus timer</button> <button id="prompts">Review prompt kit</button> <button id="turn">Simulate a measured turn</button><div data-chat-composer-stack="true"><form data-chat-composer-form="true" onsubmit="event.preventDefault()"><div data-chat-composer-surface="true"><div data-testid="composer-editor" contenteditable="true" role="textbox" aria-label="T3 draft"></div></div></form></div></main></div></div>
 <script>
-// Fixture-only telemetry with the same shape as payload/telemetry-preload.cjs.
+// Fixture-only telemetry with the same shape as payload/telemetry-preload.ts.
 // __test lets the demo and browser smoke inject measurements; the app never has it.
 (() => {
   const snapshots = new Map(); const listeners = new Set();

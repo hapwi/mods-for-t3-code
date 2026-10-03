@@ -5,6 +5,10 @@
   "name": "Focus timer",
   "description": "A small timer in the Mods tray. Start a 25 minute session and get a reminder when it ends.",
   "author": "Mods for T3 Code",
-  "permissions": ["ui.panels", "ui.commands", "ui.notify"],
-  "entry": "mod.js"
+  "permissions": [
+    "ui.panels",
+    "ui.commands",
+    "ui.notify"
+  ],
+  "entry": "mod.ts"
 }

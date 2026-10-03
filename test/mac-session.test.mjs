@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appPids, withMacAppClosed } from '../src/mac-session.mjs';
+import { appPids, withMacAppClosed } from '../src/mac-session.ts';
 const app = '/Applications/T3 Code (Nightly).app';
 const output = `  21 ${app}/Contents/MacOS/T3 Code (Nightly)\n 22 ${app}/Contents/Frameworks/Helper.app/Contents/MacOS/Helper\n 23 /Applications/Other.app/Contents/MacOS/Other\n`;
 const progress = { stage() {}, finish() {} };

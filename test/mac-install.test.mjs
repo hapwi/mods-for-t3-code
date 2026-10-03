@@ -4,7 +4,7 @@ import { access, cp, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile }
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createPackageWithOptions } from "@electron/asar";
-import { readEntry, sha256 } from "../src/archive.mjs";
+import { readEntry, sha256 } from "../src/archive.ts";
 
 const dataRoot = await mkdtemp(path.join(tmpdir(), "t3-mods-mac-"));
 process.env.MODS_FOR_T3_DATA = dataRoot;
@@ -23,8 +23,8 @@ const {
   resolveMacInstallTarget,
   sanitizeEntitlements,
   uninstallMacApp,
-} = await import("../src/mac-install.mjs");
-const { patchArchive } = await import("../src/install.mjs");
+} = await import("../src/mac-install.ts");
+const { patchArchive } = await import("../src/install.ts");
 const marker = "/* mods-for-t3-code:v1 */";
 const mac = { hostPlatform: "darwin" };
 const entitlements = `<?xml version="1.0" encoding="UTF-8"?>

@@ -50,9 +50,9 @@ tar -xzf "$download/source.tar.gz" -C "$download"
 source="$download/mods-for-t3-code-$revision"
 tool="$tools_dir/package-$revision"
 if [ ! -d "$tool" ]; then mv "$source" "$tool"; fi
-"$node_bin" "$tool/bin/cli.mjs" install "$@"
+"$node_bin" "$tool/dist/cli.mjs" install "$@"
 launcher="$tools_dir/mods-for-t3-code"
-"$node_bin" -e 'const fs=require("fs");const q=s=>"\x27"+s.replaceAll("\x27","\x27\\\x27\x27")+"\x27";fs.writeFileSync(process.argv[1],"#!/bin/sh\nexport MODS_FOR_T3_DATA="+q(process.argv[4])+"\nexec "+q(process.argv[2])+" "+q(process.argv[3])+" \"$@\"\n",{mode:0o755})' "$launcher" "$node_bin" "$tool/bin/cli.mjs" "$data_dir"
+"$node_bin" -e 'const fs=require("fs");const q=s=>"\x27"+s.replaceAll("\x27","\x27\\\x27\x27")+"\x27";fs.writeFileSync(process.argv[1],"#!/bin/sh\nexport MODS_FOR_T3_DATA="+q(process.argv[4])+"\nexec "+q(process.argv[2])+" "+q(process.argv[3])+" \"$@\"\n",{mode:0o755})' "$launcher" "$node_bin" "$tool/dist/cli.mjs" "$data_dir"
 # Retire only the shortcut created by earlier versions of this installer.
 # The existing T3 icon continues to open the patched installed app.
 "$node_bin" --input-type=module - "$node_platform" "$launcher" <<'CLEANUP'

@@ -48,7 +48,7 @@ Open the puzzle icon at the bottom of T3’s sidebar, or **Settings → Mods**.
 
 - **Built-in:** install Token Weather, Focus Timer, Prompt Kit, Midnight Theme, or Paper Theme.
 - **Installed:** enable, disable, inspect source and permissions, export, update, or remove a mod. Confirming installation switches the mod on immediately; Pause all and safe mode still prevent it from running. Row actions are in the ⋯ menu.
-- **Create:** describe a mod and put the generated authoring prompt into the current T3 composer. Choose your already logged-in provider/model and send it normally. The agent writes a `.t3mod` bundle to the watched inbox; the manager presents it for review immediately. No separate AI account or API key is required. The authoring prompt includes T3’s supported UI surfaces, theme conventions, live lifecycle, and handling for missing context data.
+- **Create:** describe a mod and put the generated authoring prompt into the current T3 composer. Choose your already logged-in provider/model and send it normally. The agent saves a `.t3mod` bundle and returns its JSON in the chat. The manager detects that response and presents it for review, including when the agent works on a remote machine. A local inbox is also watched. No separate AI account or API key is required. The authoring prompt includes T3’s supported UI surfaces, theme conventions, live lifecycle, and handling for missing context data.
 - **Development mode:** automatically apply inbox changes to an enabled mod with the same author and no additional permissions. Expanded permissions always require review.
 - **Activity:** inspect mod errors and quarantine reasons. **Pause all** stops every mod immediately.
 
@@ -102,8 +102,8 @@ export async function activate(api) {
 Declare `ui.panels` in the manifest’s `permissions`. Bundle and validate:
 
 ```sh
-node bin/cli.mjs pack examples/focus-timer --out focus-timer.t3mod
-node bin/cli.mjs validate focus-timer.t3mod
+node dist/cli.mjs pack examples/focus-timer --out focus-timer.t3mod
+node dist/cli.mjs validate focus-timer.t3mod
 ```
 
 Share the `.t3mod` file. Recipients import it from the manager, inspect permissions/source, and confirm installation to activate it. Files in the inbox follow the same review flow. SDK types are in [sdk.d.ts](sdk.d.ts); authoring examples are in [examples](examples).
@@ -116,16 +116,17 @@ Mod settings and storage use their own IndexedDB database in T3’s renderer pro
 
 ```sh
 npm ci
+npm run typecheck
 npm run build
 npm run pack:examples
 npm run demo
 # In a second terminal:
-node scripts/browser-check.mjs
+node scripts/browser-check.ts
 ```
 
-`dist/` is committed so end-user installations need no build toolchain. Regenerate it when runtime or bundled mods change. Focused archive, manifest, telemetry, and update tests live under `test/`; set `MODS_FOR_T3_DATA` to a temporary directory when running installer tests.
+Production source, example mods, and development scripts use TypeScript with strict checking. `dist/` contains the compiled JavaScript and bundled CLI, so end-user installations need no compiler, build toolchain, or npm dependencies. Regenerate it when runtime or bundled mods change. Focused archive, manifest, telemetry, and update tests live under `test/`; set `MODS_FOR_T3_DATA` to a temporary directory when running installer tests.
 
-Focused archive, telemetry, and renderer checks cover T3 `0.0.46-nightly.20261003.2623`. The telemetry preload was checked in an isolated Electron 44 fixture with sandbox and context isolation enabled. The existing macOS Nightly app was patched and launched successfully, and its Mods host/sidebar entry was confirmed. The revised icon, manager, and inline Settings view passed a focused browser fixture check; their final appearance on macOS awaits the end-user curl test. Windows runtime/signing and native updater flows still require platform testing.
+Focused archive, telemetry, and renderer checks cover T3 `0.0.46-nightly.20261003.2623`. An isolated Electron 44.4.2 window with sandbox and context isolation enabled loads the shipped host and real mod workers. Its integration check covers native hash navigation, WebSocket/HTTP reports, warm-cache hydration, forecast/chart/turn deltas, composer spacing, custom-mod review and installation from chat, and live cleanup. Run it with `node scripts/electron-integration-check.ts /path/to/electron`. Strict TypeScript checking and temporary CLI/macOS install-and-restore fixtures pass. An earlier patch launched in the existing macOS Nightly app; this revision has not been installed on the user's Mac. macOS end-user installation, Windows runtime/signing and native updater flows still require platform testing.
 
 
 See [architecture](docs/architecture.md), [changelog](CHANGELOG.md), and [license](LICENSE).

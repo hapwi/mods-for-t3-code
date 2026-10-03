@@ -1,0 +1,9 @@
+<!doctype html><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; worker-src blob:; frame-src blob:; style-src 'unsafe-inline'; connect-src http://127.0.0.1:* ws://127.0.0.1:*">
+<style>
+:root{--background:#101010;--foreground:#eee;--muted-foreground:#999;--border:#292929;--primary:#3166ed;--popover:#181818;--card:#161616;--chat-content-max-width:768px}
+body{background:var(--background);color:var(--foreground);font:13px system-ui;margin:0}main{padding:100px 40px 40px;margin-left:200px}aside{position:fixed;inset:0 auto 0 0;width:180px}footer ul{display:flex;list-style:none}button{color:inherit}.native{width:32px;height:32px;background:transparent;border:0;display:flex;align-items:center;justify-content:center}svg{width:16px;height:16px}
+form{max-width:768px;margin:80px auto 0;display:flex;flex-direction:column;gap:12px}[data-slot=composer-banner-attachment]{display:flex;justify-content:end;min-height:32px}[data-slot=composer-banner-attachment] div{border:1px solid #292929;padding:8px 16px;border-radius:18px 18px 0 0}.relative{position:relative}[data-chat-composer-main-surface]{background:#161616;border:1px solid #292929;border-radius:24px;padding:16px}[contenteditable]{min-height:100px;outline:0}
+</style>
+<aside><div data-sidebar="content"><ul><li><button>Appearance</button></li><li><button>General</button></li></ul></div><footer data-sidebar="footer"><ul><li><button aria-label="Usage" data-sidebar="menu-button" class="peer/menu-button native"><svg></svg></button></li></ul></footer></aside>
+<main><div id="messages"></div><form data-chat-composer-form><div data-slot="composer-banner-attachment"><div>Stash 1</div></div><div class="relative"><div data-chat-composer-main-surface><div data-testid="composer-editor" contenteditable="true">Draft</div><p>GPT · High · Full access</p></div></div></form></main>

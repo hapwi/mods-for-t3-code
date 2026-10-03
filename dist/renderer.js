@@ -1,5 +1,5 @@
 (() => {
-  // payload/web/manifest.js
+  // payload/web/manifest.ts
   var API_VERSION = 1;
   var MAX_BUNDLE_BYTES = 1024 * 1024;
   var PERMISSIONS = Object.freeze({
@@ -14,23 +14,44 @@
     "draft.insert": "Offer text to paste into the composer, with your confirmation",
     storage: "Store up to 64 KB of private mod data"
   });
+  function read(value, key) {
+    return Reflect.get(value, key);
+  }
+  function safeInt(value) {
+    return typeof value === "number" && Number.isSafeInteger(value);
+  }
+  function isPermission(value) {
+    return typeof value === "string" && Object.hasOwn(PERMISSIONS, value);
+  }
   function validateManifest(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("A mod needs a manifest object.");
-    if (value.apiVersion !== API_VERSION) throw new Error(`This host supports mod API ${API_VERSION}.`);
-    if (typeof value.id !== "string" || !/^[a-z][a-z0-9-]{1,63}$/.test(value.id)) throw new Error("Mod ID must be 2\u201364 lowercase letters, digits, or hyphens.");
-    if (typeof value.version !== "string" || !/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(value.version)) throw new Error("Use a SemVer version, for example 1.0.0.");
+    if (read(value, "apiVersion") !== API_VERSION) throw new Error(`This host supports mod API ${API_VERSION}.`);
+    const id = read(value, "id");
+    if (typeof id !== "string" || !/^[a-z][a-z0-9-]{1,63}$/.test(id)) throw new Error("Mod ID must be 2\u201364 lowercase letters, digits, or hyphens.");
+    const version = read(value, "version");
+    if (typeof version !== "string" || !/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(version)) throw new Error("Use a SemVer version, for example 1.0.0.");
+    const text = {};
     for (const field of ["name", "description", "author"]) {
-      if (typeof value[field] !== "string" || !value[field].trim() || value[field].length > (field === "description" ? 600 : 100)) throw new Error(`Supply a short ${field}.`);
+      const item = read(value, field);
+      if (typeof item !== "string" || !item.trim() || item.length > (field === "description" ? 600 : 100)) throw new Error(`Supply a short ${field}.`);
+      text[field] = item;
     }
-    if (!Array.isArray(value.permissions) || value.permissions.some((p) => !Object.hasOwn(PERMISSIONS, p))) throw new Error("The manifest contains an unsupported permission.");
-    if (new Set(value.permissions).size !== value.permissions.length) throw new Error("Permissions must be unique.");
-    return { apiVersion: API_VERSION, id: value.id, version: value.version, name: value.name, description: value.description, author: value.author, permissions: [...value.permissions] };
+    const permissions = read(value, "permissions");
+    if (!Array.isArray(permissions) || !permissions.every(isPermission)) throw new Error("The manifest contains an unsupported permission.");
+    if (new Set(permissions).size !== permissions.length) throw new Error("Permissions must be unique.");
+    const name = text.name;
+    const description = text.description;
+    const author = text.author;
+    if (name === void 0 || description === void 0 || author === void 0) throw new Error("Supply a short name.");
+    return { apiVersion: API_VERSION, id, version, name, description, author, permissions: [...permissions] };
   }
   function validateBundle(value) {
-    const manifest = validateManifest(value?.manifest);
-    if (value.format !== "t3mod/1" || typeof value.code !== "string" || !value.code.trim()) throw new Error("Choose a .t3mod bundle made with the pack command.");
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Choose a .t3mod bundle made with the pack command.");
+    const manifest = validateManifest(read(value, "manifest"));
+    const code = read(value, "code");
+    if (read(value, "format") !== "t3mod/1" || typeof code !== "string" || !code.trim()) throw new Error("Choose a .t3mod bundle made with the pack command.");
     if (new TextEncoder().encode(JSON.stringify(value)).length > MAX_BUNDLE_BYTES) throw new Error("A mod bundle must be smaller than 1 MB.");
-    return { format: "t3mod/1", manifest, code: value.code };
+    return { format: "t3mod/1", manifest, code };
   }
   function assertPermission(manifest, permission) {
     if (!manifest.permissions.includes(permission)) throw new Error(`Permission not granted: ${permission}`);
@@ -40,23 +61,31 @@
     return value;
   }
   function validatePanel(value) {
-    if (!value || typeof value !== "object") throw new Error("Expected a panel.");
-    const title = textValue(value.title, 100);
-    const body = textValue(value.body ?? "", 1e4);
-    if (!Array.isArray(value.actions ?? []) || (value.actions ?? []).length > 8) throw new Error("A panel can contain up to 8 actions.");
-    const actions = (value.actions ?? []).map((action) => ({ id: textValue(action.id, 64), label: textValue(action.label, 80) }));
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Expected a panel.");
+    const title = textValue(read(value, "title"), 100);
+    const bodyField = read(value, "body");
+    const body = textValue(bodyField == null ? "" : bodyField, 1e4);
+    const rawActions = read(value, "actions") ?? [];
+    if (!Array.isArray(rawActions) || rawActions.length > 8) throw new Error("A panel can contain up to 8 actions.");
+    const actions = rawActions.map((action) => {
+      if (!action || typeof action !== "object" || Array.isArray(action)) throw new Error("Expected text of at most 64 characters.");
+      return { id: textValue(read(action, "id"), 64), label: textValue(read(action, "label"), 80) };
+    });
     return { title, body, actions };
   }
-  var BAND_TONES = Object.freeze(["default", "muted", "yellow", "cyan", "blue", "magenta", "red"]);
+  var BAND_TONES = ["default", "muted", "yellow", "cyan", "blue", "magenta", "red"];
+  function isBandTone(value) {
+    return typeof value === "string" && BAND_TONES.some((tone) => tone === value);
+  }
   function validateBand(value) {
     if (!Array.isArray(value) || value.length < 1 || value.length > 16) throw new Error("A band needs 1\u201316 text parts.");
     let total = 0;
     const parts = value.map((part) => {
       if (!part || typeof part !== "object" || Array.isArray(part)) throw new Error("Each band part needs text.");
-      const text = textValue(part.text, 160);
+      const text = textValue(read(part, "text"), 160);
       if (/[\u0000-\u001f\u007f\u2028\u2029]/.test(text)) throw new Error("Band text must be a single line without control characters.");
-      const tone = part.tone ?? "default";
-      if (!BAND_TONES.includes(tone)) throw new Error(`Use a band tone: ${BAND_TONES.join(", ")}.`);
+      const tone = read(part, "tone") ?? "default";
+      if (!isBandTone(tone)) throw new Error(`Use a band tone: ${BAND_TONES.join(", ")}.`);
       total += text.length;
       return { text, tone };
     });
@@ -66,20 +95,23 @@
   function usageSnapshot(value) {
     if (!value || typeof value !== "object") return null;
     const id = (item) => typeof item === "string" && item.length > 0 && item.length <= 300 ? item : null;
-    const threadId = id(value.threadId);
-    if (!threadId || !Number.isSafeInteger(value.usedTokens) || value.usedTokens < 0) return null;
-    const turnId = id(value.turnId);
+    const threadId = id(read(value, "threadId"));
+    const usedTokens = read(value, "usedTokens");
+    if (!threadId || !safeInt(usedTokens) || usedTokens < 0) return null;
+    const turnId = id(read(value, "turnId"));
+    const maxTokens = read(value, "maxTokens");
+    const measuredAt = read(value, "measuredAt");
     return {
       threadId,
       turnId,
-      usedTokens: value.usedTokens,
-      maxTokens: Number.isSafeInteger(value.maxTokens) && value.maxTokens > 0 ? value.maxTokens : null,
-      measuredAt: Number.isFinite(value.measuredAt) ? value.measuredAt : Date.now(),
-      complete: value.complete === true && turnId !== null
+      usedTokens,
+      maxTokens: safeInt(maxTokens) && maxTokens > 0 ? maxTokens : null,
+      measuredAt: typeof measuredAt === "number" && Number.isFinite(measuredAt) ? measuredAt : Date.now(),
+      complete: read(value, "complete") === true && turnId !== null
     };
   }
 
-  // payload/web/database.js
+  // payload/web/database.ts
   var DB_NAME = "mods-for-t3-code-v1";
   var opening;
   function open() {
@@ -93,7 +125,7 @@
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => {
         opening = void 0;
-        reject(request.error);
+        reject(request.error ?? new Error("Could not open mod storage."));
       };
     });
     return opening;
@@ -108,52 +140,117 @@
         result = request.result;
       };
       transaction.oncomplete = () => resolve(result);
-      transaction.onerror = () => reject(transaction.error);
+      transaction.onerror = () => reject(transaction.error ?? new Error("Mod storage failed."));
       transaction.onabort = () => reject(transaction.error ?? new Error("Mod storage transaction cancelled."));
     });
   }
+  function jsonObject(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return value;
+  }
   var database = {
-    list: () => operation("mods", "readonly", (store) => store.getAll()),
-    save: (record) => operation("mods", "readwrite", (store) => store.put(record)),
+    async list() {
+      const records = await operation("mods", "readonly", (store) => store.getAll());
+      return Array.isArray(records) ? records : [];
+    },
+    save(record) {
+      return operation("mods", "readwrite", (store) => store.put(record)).then(() => void 0);
+    },
     async remove(id) {
       const db = await open();
       return new Promise((resolve, reject) => {
         const transaction = db.transaction(["mods", "data"], "readwrite");
         transaction.objectStore("mods").delete(id);
         transaction.objectStore("data").delete(id);
-        transaction.oncomplete = resolve;
-        transaction.onerror = () => reject(transaction.error);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error ?? new Error("Mod storage failed."));
       });
     },
-    getData: (id) => operation("data", "readonly", (store) => store.get(id)).then((value) => value ?? {}),
-    setData: (id, value) => operation("data", "readwrite", (store) => store.put(value, id)),
-    getSetting: (key) => operation("settings", "readonly", (store) => store.get(key)),
-    setSetting: (key, value) => operation("settings", "readwrite", (store) => store.put(value, key))
+    async getData(id) {
+      return jsonObject(await operation("data", "readonly", (store) => store.get(id)));
+    },
+    setData(id, value) {
+      return operation("data", "readwrite", (store) => store.put(value, id)).then(() => void 0);
+    },
+    getSetting(key) {
+      return operation("settings", "readonly", (store) => store.get(key));
+    },
+    setSetting(key, value) {
+      return operation("settings", "readwrite", (store) => store.put(value, key)).then(() => void 0);
+    }
   };
 
-  // payload/web/runtime.js
+  // payload/web/route.ts
+  function routePath(value = location) {
+    const path = value.hash?.startsWith("#/") ? value.hash.slice(1) : value.pathname;
+    return path.split(/[?#]/, 1)[0] || "/";
+  }
+
+  // payload/web/runtime.ts
+  var MOD_METHODS = /* @__PURE__ */ new Set(["events.subscribe", "commands.register", "panels.set", "panels.clear", "notify", "theme.set", "theme.clear", "band.set", "band.clear", "session.usage", "route.get", "draft.read", "draft.insert", "storage.get", "storage.set", "log"]);
+  function isRecord(value) {
+    return typeof value === "object" && value !== null;
+  }
+  function isModMethod(value) {
+    return typeof value === "string" && MOD_METHODS.has(value);
+  }
+  function jsonValue(value) {
+    if (value === null || typeof value === "boolean" || typeof value === "string") return value;
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) throw new Error("Storage values must be JSON.");
+      return value;
+    }
+    if (Array.isArray(value)) return value.map((item) => jsonValue(item));
+    if (typeof value === "object") {
+      const result = {};
+      for (const [key, item] of Object.entries(value)) result[key] = jsonValue(item);
+      return result;
+    }
+    throw new Error("Storage values must be JSON.");
+  }
+  function eventPermission(name) {
+    switch (name) {
+      case "app.route":
+        return "app.route";
+      case "draft.change":
+        return "draft.read";
+      case "session.usage":
+      case "turn.complete":
+        return "session.usage";
+      default:
+        return void 0;
+    }
+  }
   var ModRuntime = class {
+    record;
+    hooks;
+    stopped = false;
+    pending = /* @__PURE__ */ new Map();
+    subscriptions = /* @__PURE__ */ new Set();
+    inFlight = 0;
+    callTimes = [];
+    sequence = 0;
+    lastHeartbeat = Date.now();
+    lastTick = Date.now();
+    frame = document.createElement("iframe");
+    channel = new MessageChannel();
+    port;
+    initTimer;
+    heartbeatTimer;
+    storageQueue;
     constructor(record, hooks, sandboxDocument) {
       this.record = record;
       this.hooks = hooks;
-      this.stopped = false;
-      this.pending = /* @__PURE__ */ new Map();
-      this.subscriptions = /* @__PURE__ */ new Set();
-      this.inFlight = 0;
-      this.callTimes = [];
-      this.sequence = 0;
-      this.lastHeartbeat = Date.now();
-      this.lastTick = Date.now();
-      this.frame = document.createElement("iframe");
       this.frame.hidden = true;
       this.frame.title = `${record.manifest.name} isolated runtime`;
       this.frame.setAttribute("sandbox", "allow-scripts");
       this.frame.srcdoc = sandboxDocument;
-      this.channel = new MessageChannel();
       this.port = this.channel.port1;
-      this.port.onmessage = ({ data }) => void this.receive(data);
+      this.port.onmessage = (event) => {
+        void this.receive(event.data);
+      };
       this.port.start();
-      this.frame.onload = () => this.frame.contentWindow.postMessage({ type: "t3mods.connect" }, "*", [this.channel.port2]);
+      this.frame.onload = () => this.frame.contentWindow?.postMessage({ type: "t3mods.connect" }, "*", [this.channel.port2]);
       document.body.append(this.frame);
       this.initTimer = setTimeout(() => this.fail("Mod startup took longer than 5 seconds."), 5e3);
       this.heartbeatTimer = setInterval(() => {
@@ -168,7 +265,7 @@
       }, 1e3);
     }
     async receive(message) {
-      if (this.stopped || !message || typeof message !== "object") return;
+      if (this.stopped || !isRecord(message) || typeof message.type !== "string") return;
       if (message.type === "connected") {
         this.port.postMessage({ type: "init", code: this.record.code });
       } else if (message.type === "ready") {
@@ -179,6 +276,7 @@
       } else if (message.type === "fault") {
         this.fail(String(message.error).slice(0, 1e3));
       } else if (message.type === "done") {
+        if (typeof message.requestId !== "number") return;
         clearTimeout(this.pending.get(message.requestId));
         this.pending.delete(message.requestId);
       } else if (message.type === "call") {
@@ -193,11 +291,12 @@
         const userDecision = message.method === "draft.insert";
         if (userDecision) for (const timer of this.pending.values()) clearTimeout(timer);
         try {
-          if (!Number.isSafeInteger(message.id) || !Array.isArray(message.args) || JSON.stringify(message.args).length > 1e5) throw new Error("Invalid host request.");
-          const value = await this.handle(message.method, message.args);
+          const args = Array.isArray(message.args) ? message.args.map((item) => item) : null;
+          if (!Number.isSafeInteger(message.id) || !args || JSON.stringify(args).length > 1e5) throw new Error("Invalid host request.");
+          const value = await this.handle(message.method, args);
           if (!this.stopped) this.port.postMessage({ type: "result", id: message.id, value });
         } catch (error) {
-          if (!this.stopped) this.port.postMessage({ type: "result", id: message.id, error: error.message });
+          if (!this.stopped) this.port.postMessage({ type: "result", id: message.id, error: error instanceof Error ? error.message : "Mod request failed." });
         } finally {
           this.inFlight--;
           if (userDecision && !this.stopped) {
@@ -208,21 +307,25 @@
       }
     }
     async handle(method, args) {
+      if (!isModMethod(method)) throw new Error("Unknown mod API method.");
       const manifest = this.record.manifest;
       const require2 = (permission) => assertPermission(manifest, permission);
       switch (method) {
         case "events.subscribe": {
           const name = textValue(args[0], 40);
-          const events = { "app.route": "app.route", "draft.change": "draft.read", "session.usage": "session.usage", "turn.complete": "session.usage" };
-          if (!Object.hasOwn(events, name)) throw new Error("Unsupported event.");
-          require2(events[name]);
+          const permission = eventPermission(name);
+          if (!permission) throw new Error("Unsupported event.");
+          require2(permission);
           this.subscriptions.add(name);
           return;
         }
-        case "commands.register":
+        case "commands.register": {
           require2("ui.commands");
-          this.hooks.command(this, { id: textValue(args[0]?.id, 64), title: textValue(args[0]?.title, 100) });
+          const command = args[0];
+          if (!command || typeof command !== "object" || Array.isArray(command)) throw new Error("Expected text of at most 64 characters.");
+          this.hooks.command(this, { id: textValue(Reflect.get(command, "id"), 64), title: textValue(Reflect.get(command, "title"), 100) });
           return;
+        }
         case "panels.set":
           require2("ui.panels");
           this.hooks.panel(this, validatePanel(args[0]));
@@ -256,7 +359,7 @@
           return this.hooks.usage();
         case "route.get":
           require2("app.route");
-          return location.pathname;
+          return routePath();
         case "draft.read":
           require2("draft.read");
           return this.hooks.readDraft();
@@ -273,10 +376,10 @@
           require2("storage");
           const key = textValue(args[0], 100);
           if (["__proto__", "constructor", "prototype"].includes(key)) throw new Error("Reserved storage key.");
-          this.storageQueue = (this.storageQueue ?? Promise.resolve()).catch(() => {
-          }).then(async () => {
+          const stored = jsonValue(args[1]);
+          this.storageQueue = (this.storageQueue ?? Promise.resolve()).catch(() => void 0).then(async () => {
             const value = await database.getData(manifest.id);
-            const next = { ...value, [key]: args[1] };
+            const next = { ...value, [key]: stored };
             if (new TextEncoder().encode(JSON.stringify(next)).length > 65536) throw new Error("Mod storage is limited to 64 KB.");
             if (!this.stopped) await database.setData(manifest.id, next);
           });
@@ -285,8 +388,10 @@
         case "log":
           this.hooks.log(this, textValue(args[0], 1e3));
           return;
-        default:
-          throw new Error("Unknown mod API method.");
+        default: {
+          const unreachable = method;
+          throw new Error(`Unknown mod API method: ${unreachable}`);
+        }
       }
     }
     dispatch(message) {
@@ -305,7 +410,7 @@
     fail(reason) {
       if (this.stopped) return;
       this.stop();
-      this.hooks.fault(this, reason);
+      void this.hooks.fault(this, reason);
     }
     stop() {
       if (this.stopped) return;
@@ -321,7 +426,7 @@
     }
   };
 
-  // payload/web/adapter.js
+  // payload/web/adapter.ts
   function composer() {
     const editors = [...document.querySelectorAll('[data-testid="composer-editor"][contenteditable="true"]')];
     return editors.find((editor) => editor.getClientRects().length > 0) ?? null;
@@ -334,6 +439,7 @@
     if (!editor) throw new Error("Open a T3 thread with a composer, then try again.");
     editor.focus();
     const selection = getSelection();
+    if (!selection) throw new Error("Open a T3 thread with a composer, then try again.");
     const range = document.createRange();
     range.selectNodeContents(editor);
     range.collapse(false);
@@ -345,40 +451,60 @@
     editor.dispatchEvent(event);
     if (!event.defaultPrevented) throw new Error("This T3 editor does not support the paste adapter. Copy the text and paste it manually.");
   }
+  var FLOATING = { position: "absolute", left: "0", width: "auto", maxWidth: "none", margin: "0", zIndex: "30", pointerEvents: "none" };
   function dockAboveComposer(element) {
     let wanted = false;
     let frame;
-    let anchor;
-    function composerAnchor(editor) {
-      let result = editor.closest("[data-chat-composer-form]") ?? editor.closest("form") ?? editor;
-      for (let parent = editor.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
-        if (parent.matches('[data-chat-composer-overlay], main, [data-slot="sidebar-inset"]')) break;
-        if (parent.contains(result) && parent !== result) {
-          const style2 = getComputedStyle(parent);
-          if (parseFloat(style2.borderTopWidth) > 0 && parseFloat(style2.borderTopLeftRadius) >= 12) result = parent;
-        }
-      }
-      return result;
+    let observed = [];
+    const inFlow = element.style.cssText;
+    const resizeObserver = new ResizeObserver(() => schedule());
+    function schedule() {
+      if (wanted && frame === void 0) frame = requestAnimationFrame(place);
+    }
+    function watch(...targets) {
+      const next = targets.filter((target) => Boolean(target));
+      if (next.length === observed.length && next.every((target, index) => target === observed[index])) return;
+      resizeObserver.disconnect();
+      observed = next;
+      for (const target of next) resizeObserver.observe(target);
+    }
+    function float(main, dock) {
+      const box = main.getBoundingClientRect();
+      const parts = dock?.getClientRects().length ? [...dock.children].map((child) => child.getBoundingClientRect()).filter((rect) => rect.width && rect.height) : [];
+      let lift = 0;
+      let reserve = 0;
+      if (parts.some((rect) => rect.width > box.width / 2 || rect.left < box.left + box.width / 2)) lift = Math.max(0, box.top - Math.min(...parts.map((rect) => rect.top)));
+      else if (parts.length) reserve = Math.max(0, box.right - Math.min(...parts.map((rect) => rect.left)) + 8);
+      Object.assign(element.style, FLOATING, { right: `${reserve}px`, bottom: `calc(100% + ${lift + 6}px)` });
     }
     function place() {
       frame = void 0;
       const editor = wanted ? composer() : null;
       if (!editor) {
-        anchor = void 0;
+        watch();
         element.remove();
         return;
       }
-      if (anchor?.isConnected && anchor.contains(editor) && element.nextElementSibling === anchor) return;
-      anchor = composerAnchor(editor);
+      const main = editor.closest("[data-chat-composer-main-surface]");
+      const form = editor.closest("[data-chat-composer-form]") ?? editor.closest("form");
+      if (main?.parentElement) {
+        if (element.nextElementSibling !== main) main.before(element);
+        const dock = form ? [...form.children].find((child) => child instanceof HTMLElement && child.matches('[data-slot="composer-banner-attachment"]')) ?? null : null;
+        watch(main, dock);
+        float(main, dock);
+        return;
+      }
+      watch();
+      element.style.cssText = inFlow;
+      element.style.marginBottom = "6px";
+      const anchor = form ?? editor;
       if (!anchor.parentElement) {
         element.remove();
         return;
       }
       if (element.nextElementSibling !== anchor) anchor.before(element);
     }
-    const observer = new MutationObserver(() => {
-      if (wanted && !frame) frame = requestAnimationFrame(place);
-    });
+    const observer = new MutationObserver(schedule);
     observer.observe(document.body, { subtree: true, childList: true });
     return {
       show(value) {
@@ -388,7 +514,8 @@
       dispose() {
         wanted = false;
         observer.disconnect();
-        cancelAnimationFrame(frame);
+        resizeObserver.disconnect();
+        if (frame !== void 0) cancelAnimationFrame(frame);
         element.remove();
       }
     };
@@ -399,7 +526,7 @@
     return document.querySelector('[data-sidebar="footer"]') ?? document.querySelector('[data-slot="sidebar-footer"]');
   }
   function footerReference(footer) {
-    const icons = [...footer.querySelectorAll("button[aria-label]")].filter((item) => !item.closest("[data-t3mods]") && !item.textContent.trim() && item.querySelector("svg"));
+    const icons = [...footer.querySelectorAll("button[aria-label]")].filter((item) => item instanceof HTMLButtonElement && !item.closest("[data-t3mods]") && !item.textContent?.trim() && Boolean(item.querySelector("svg")));
     const menuButtons = icons.filter((item) => item.classList.contains("peer/menu-button") || item.getAttribute("data-sidebar") === "menu-button" || item.getAttribute("data-slot") === "sidebar-menu-button");
     return menuButtons.at(-1) ?? icons.at(-1) ?? null;
   }
@@ -475,7 +602,7 @@
         return;
       }
       reference = void 0;
-      if (footer && UTILITY_PAGE.test(location.pathname)) {
+      if (footer && UTILITY_PAGE.test(routePath())) {
         hideTip();
         item.remove();
         button2.remove();
@@ -492,28 +619,32 @@
       if (button2.parentElement !== document.body) document.body.append(button2);
     }
     const observer = new MutationObserver(() => {
-      if (!frame) frame = requestAnimationFrame(attach);
+      if (frame === void 0) frame = requestAnimationFrame(attach);
     });
     observer.observe(document.body, { subtree: true, childList: true });
     attach();
     return () => {
       observer.disconnect();
-      cancelAnimationFrame(frame);
+      if (frame !== void 0) cancelAnimationFrame(frame);
       hideTip();
       button2.remove();
       item.remove();
     };
   }
 
-  // payload/web/author.js
+  // payload/web/author.ts
   function authorPrompt(description, inbox) {
+    const destination = inbox || "the current workspace";
     return `Create a mod for Mods for T3 Code (API version 1).
 
 What I want: ${description}
 
-Use my existing T3 provider session. Produce a self-contained .t3mod JSON file.
-Save it to ${inbox || "the current workspace"}/<id>.t3mod. Do not change T3 itself.
-The host watches its inbox and will ask me to review the mod before it runs.
+Use my existing T3 provider session. Produce one self-contained .t3mod JSON bundle.
+Do not change T3 itself. Nothing runs until I review it in the Mods manager and choose Install.
+
+How to hand the bundle back \u2014 do both:
+- Save the JSON file to ${destination}/<id>.t3mod when that folder is writable.
+- Put the same complete JSON in exactly one fenced code block tagged t3mod in your reply. The Mods host reads that rendered block in this window. The provider may be running on another computer, so a file written only on that machine never reaches this inbox. The code block is what makes the mod show up for review. Do not split the JSON, add prose inside the block, or tag it as json or markdown. The block text must be complete JSON beginning with {"format":"t3mod/1" and must stay under 1 MB. Incomplete or invalid JSON is ignored. Repeating a bundle I already installed or dismissed does not open another review.
 
 T3 integration and design contract:
 This is a mod inside the existing T3 Code Electron app. T3 already owns the sidebar, Settings, thread list, conversation, composer, provider picker, and attachment drawer. Use the supported host surfaces below; do not rebuild T3, inject an overlay, invent DOM selectors, or assume a Claude Code terminal plugin API. Mods are workers, so document/window/React and T3's internal stores are unavailable. The host places and styles your output to match the current T3 theme.
@@ -538,10 +669,10 @@ The code string is complete JavaScript, runs in an isolated browser worker, and 
 - api.log("message") is always available.
 activate may return a cleanup function. All actions should finish within 5 seconds. Timers are fine. Long loops cause quarantine. Never request permissions outside this list.
 
-Before saving, check the JavaScript syntax and JSON escaping without executing host API calls outside T3. Walk through activation, missing data, unknown window size, navigation, repeated completion events, disable, and re-enable. Do not claim a live T3 check you did not perform. Write valid JSON with properly escaped code. Do not use markdown inside the file. After writing it, tell me what it does and which permissions to review. If saving to the inbox is unavailable, save in the workspace and tell me to use Import in the Mods manager.`;
+Before you answer, check the JavaScript syntax and JSON escaping without executing host API calls outside T3. Walk through activation, missing data, unknown window size, navigation, repeated completion events, disable, and re-enable. Do not claim a live T3 check you did not perform. The saved file and the t3mod block are raw JSON, not markdown. After the block, tell me what the mod does and which permissions to review.`;
   }
 
-  // payload/web/style.js
+  // payload/web/style.ts
   var style = `
 :host{--mf-fg:var(--foreground,#f5f5f5);--mf-muted:var(--muted-foreground,#a1a1aa);--mf-border:var(--border,#ffffff14);--mf-input:var(--input,var(--mf-border));--mf-bg:var(--background,#0a0a0a);--mf-card:var(--card,var(--mf-bg));--mf-popover:var(--popover,var(--mf-bg));--mf-accent:var(--accent,color-mix(in srgb,var(--mf-fg) 6%,transparent));--mf-primary:var(--primary,#3b82f6);--mf-primary-fg:var(--primary-foreground,#fff);--mf-ring:var(--ring,var(--mf-muted));--mf-danger:var(--destructive,#ef4444);--mf-radius:var(--radius,.625rem);--mf-control-radius:var(--control-radius,calc(var(--mf-radius) - 2px));font:13px/1.5 var(--font-sans,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif);color:var(--mf-fg);color-scheme:inherit;-webkit-font-smoothing:antialiased}
 *{box-sizing:border-box}h1,h2,h3,p{margin:0}button,input,textarea{font:inherit;color:inherit}
@@ -591,38 +722,41 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
 .panel{padding:10px;border-top:1px solid var(--mf-border)}.panel h2{font-size:13px;font-weight:600;margin:1px 0 4px}.panel p{font-size:12px;line-height:1.5;color:var(--mf-muted);white-space:pre-wrap}.panel .actions{justify-content:flex-start;flex-wrap:wrap;gap:4px;margin-top:8px}
 .panel-tray[data-docked]{position:relative;inset:auto;width:100%;max-height:30vh;box-shadow:none;z-index:auto;margin-bottom:8px;background:var(--mf-card)}
 @media(max-width:600px){header{padding:16px 16px 10px}.tabs{margin-inline:16px;max-width:calc(100% - 32px)}.content{padding:12px 16px 16px}.row{flex-direction:column;align-items:stretch;gap:8px}.row-actions{justify-content:flex-start;flex-wrap:wrap}.panel-tray{width:280px}}
-.band-stack{max-width:48rem;margin:0 auto 6px;padding:0 14px;font-size:12px;line-height:18px;color:var(--mf-muted)}.band{white-space:pre;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}.band [data-tone=muted]{color:var(--mf-muted)}.band [data-tone=yellow]{color:var(--color-yellow-500,#d4a72c)}.band [data-tone=cyan]{color:var(--color-cyan-500,#22a8bd)}.band [data-tone=blue]{color:var(--info,var(--color-blue-500,#3b82f6))}.band [data-tone=magenta]{color:var(--color-fuchsia-500,#c85bd8)}.band [data-tone=red]{color:var(--destructive,#e5534b)}
+.band-stack{padding:0 16px;font-size:12px;line-height:16px;color:var(--mf-muted)}.band{white-space:pre;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}.band [data-tone=muted]{color:var(--mf-muted)}.band [data-tone=yellow]{color:var(--color-yellow-500,#d4a72c)}.band [data-tone=cyan]{color:var(--color-cyan-500,#22a8bd)}.band [data-tone=blue]{color:var(--info,var(--color-blue-500,#3b82f6))}.band [data-tone=magenta]{color:var(--color-fuchsia-500,#c85bd8)}.band [data-tone=red]{color:var(--destructive,#e5534b)}
 `;
 
-  // payload/web/themes.js
+  // payload/web/themes.ts
   var THEME_TOKENS = ["background", "foreground", "card", "card-foreground", "popover", "popover-foreground", "primary", "primary-foreground", "secondary", "secondary-foreground", "muted", "muted-foreground", "accent", "accent-foreground", "border", "input", "ring", "sidebar", "sidebar-foreground", "sidebar-primary", "sidebar-primary-foreground", "sidebar-accent", "sidebar-accent-foreground", "sidebar-border", "sidebar-ring"];
   var pairs = [["background", "foreground"], ["card", "card-foreground"], ["popover", "popover-foreground"], ["primary", "primary-foreground"], ["secondary", "secondary-foreground"], ["muted", "muted-foreground"], ["accent", "accent-foreground"], ["sidebar", "sidebar-foreground"], ["sidebar-primary", "sidebar-primary-foreground"], ["sidebar-accent", "sidebar-accent-foreground"]];
+  function isThemeToken(value) {
+    return THEME_TOKENS.some((token) => token === value);
+  }
   function luminance(hex) {
     const rgb = [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16) / 255).map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
-    return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+    return (rgb[0] ?? 0) * 0.2126 + (rgb[1] ?? 0) * 0.7152 + (rgb[2] ?? 0) * 0.0722;
   }
   function validateTheme(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Expected theme color tokens.");
     const theme = {};
     for (const [token, color] of Object.entries(value)) {
-      if (!THEME_TOKENS.includes(token) || typeof color !== "string" || !/^#[0-9a-f]{6}$/i.test(color)) throw new Error(`Use a supported color token and an opaque #RRGGBB color: ${token}`);
+      if (!isThemeToken(token) || typeof color !== "string" || !/^#[0-9a-f]{6}$/i.test(color)) throw new Error(`Use a supported color token and an opaque #RRGGBB color: ${token}`);
       theme[token] = color;
     }
     if (!theme.background || !theme.foreground) throw new Error("A theme must provide background and foreground.");
     for (const [background, foreground] of pairs) {
-      if (!theme[background] && !theme[foreground]) continue;
-      if (!theme[background] || !theme[foreground]) throw new Error(`Provide ${background} and ${foreground} together.`);
-      const a = luminance(theme[background]);
-      const b = luminance(theme[foreground]);
+      const back = theme[background];
+      const fore = theme[foreground];
+      if (!back && !fore) continue;
+      if (!back || !fore) throw new Error(`Provide ${background} and ${foreground} together.`);
+      const a = luminance(back);
+      const b = luminance(fore);
       if ((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) < 4.5) throw new Error(`The ${background}/${foreground} pair needs readable contrast (4.5:1).`);
     }
     return theme;
   }
   var ThemeHost = class {
-    constructor() {
-      this.themes = /* @__PURE__ */ new Map();
-      this.original = /* @__PURE__ */ new Map();
-    }
+    themes = /* @__PURE__ */ new Map();
+    original = /* @__PURE__ */ new Map();
     set(id, colors) {
       this.themes.delete(id);
       this.themes.set(id, validateTheme(colors));
@@ -651,17 +785,19 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
     }
   };
 
-  // payload/web/host.js
+  // payload/web/host.ts
   function node(tag, attributes = {}, children = []) {
     const element = document.createElement(tag);
     for (const [key, value] of Object.entries(attributes)) {
-      if (key === "class") element.className = value;
-      else if (key === "text") element.textContent = value;
-      else if (key.startsWith("on")) element.addEventListener(key.slice(2), value);
-      else if (key in element) element[key] = value;
-      else element.setAttribute(key, value);
+      if (value == null) continue;
+      if (key === "class") element.className = String(value);
+      else if (key === "text") element.textContent = String(value);
+      else if (key === "style") element.setAttribute("style", String(value));
+      else if (key.startsWith("on") && typeof value === "function") element.addEventListener(key.slice(2), value);
+      else if (key in element) Reflect.set(element, key, value);
+      else element.setAttribute(key, String(value));
     }
-    element.append(...children);
+    if (children.length) element.append(...children);
     return element;
   }
   var button = (text, onclick, className = "") => node("button", { text, onclick, class: className, type: "button" });
@@ -678,6 +814,20 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
   }
   var MORE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>';
   var note = (text) => node("div", { class: "row" }, [node("p", { class: "explain", text })]);
+  var MAX_RENDERED_BLOCKS = 20;
+  function seenMap(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const seen = {};
+    for (const [key, item] of Object.entries(value)) if (typeof item === "number") seen[key] = item;
+    return seen;
+  }
+  function messageText(error) {
+    return error instanceof Error ? error.message : "Something went wrong.";
+  }
+  async function digestBundle(bundle) {
+    const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(bundle)));
+    return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
   async function mount(options) {
     if (window.__modsForT3Code) return;
     const root = node("div", { id: "mods-for-t3-code-host" });
@@ -705,23 +855,25 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
     const notices = [];
     let paused = Boolean(await database.getSetting("paused"));
     let development = Boolean(await database.getSetting("development"));
-    let seenInbox = await database.getSetting("seenInbox") ?? {};
+    let seenInbox = seenMap(await database.getSetting("seenInbox"));
     let tab = "installed";
     let candidate;
     const candidates = [];
     let busy = false;
     let trayOpen = true;
-    let lastPath = location.pathname;
+    let lastPath = routePath();
     let draftTimer;
     let disposed = false;
     let channel;
     let detailsOnly = false;
     let inlineContent;
-    let inlineDisplay;
+    let inlineDisplay = "";
     let decisionQueue = Promise.resolve();
     let telemetry;
     let unsubscribeTelemetry;
     let menu;
+    let bundleScan;
+    const scannedBlocks = /* @__PURE__ */ new WeakMap();
     function closeMenu(restoreFocus = false) {
       if (!menu) return;
       const { popup, trigger } = menu;
@@ -751,13 +903,15 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
         closeMenu(true);
         action();
       } }));
-      const popup = node("div", { class: "menu", role: "menu", "aria-label": trigger.getAttribute("aria-label") }, entries);
+      const popup = node("div", { class: "menu", role: "menu", "aria-label": trigger.getAttribute("aria-label") ?? "Menu" }, entries);
       popup.addEventListener("keydown", (event) => {
-        const index = entries.indexOf(shadow.activeElement);
-        const move = { ArrowDown: index + 1, ArrowUp: index - 1, Home: 0, End: entries.length - 1 }[event.key];
+        const active = shadow.activeElement;
+        const index = active instanceof HTMLButtonElement ? entries.indexOf(active) : -1;
+        const moves = { ArrowDown: index + 1, ArrowUp: index - 1, Home: 0, End: entries.length - 1 };
+        const move = moves[event.key];
         if (move !== void 0) {
           event.preventDefault();
-          entries[(move + entries.length) % entries.length].focus();
+          entries[(move + entries.length) % entries.length]?.focus();
         } else if (event.key === "Tab") {
           event.preventDefault();
           closeMenu(true);
@@ -773,7 +927,10 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
       entries[0]?.focus();
     }
     const onPointerDown = (event) => {
-      if (menu && !event.composedPath().some((target) => target === menu.popup || target === menu.trigger)) closeMenu();
+      const current = menu;
+      if (!current) return;
+      const path = event.composedPath();
+      if (!path.includes(current.popup) && !path.includes(current.trigger)) closeMenu();
     };
     const onViewportChange = () => closeMenu();
     function ask(title, description, action, destructive = false) {
@@ -797,7 +954,7 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
     async function remember(bundle) {
       if (!bundle?.inboxHash) return;
       seenInbox[bundle.inboxHash] = Date.now();
-      seenInbox = Object.fromEntries(Object.entries(seenInbox).sort((a, b) => b[1] - a[1]).slice(0, 200));
+      seenInbox = Object.fromEntries(Object.entries(seenInbox).sort((left, right) => right[1] - left[1]).slice(0, 200));
       await database.setSetting("seenInbox", seenInbox);
     }
     function leaveInline() {
@@ -855,24 +1012,25 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
         const runtime = runtimes.get(id);
         if (!runtime || rows.length >= 4) continue;
         const name = runtime.record.manifest.name;
-        rows.push(node("div", { class: "band", title: name, "aria-label": `${name}: ${parts.map((part) => part.text).join("")}`, "data-mod": id }, parts.map((part) => node("span", { "data-tone": part.tone, text: part.text }))));
+        rows.push(node("div", { class: "band", title: name, "aria-label": `${name}: ${parts.map((part) => part.text).join("")}`, "data-mod": id }, parts.map((part) => node("span", { "data-tone": part.tone ?? "default", text: part.text }))));
       }
       bandStack.replaceChildren(...rows);
       bandDock.show(rows.length > 0);
     }
     function currentUsage() {
       try {
-        return usageSnapshot(telemetry?.get(location.pathname));
+        return usageSnapshot(telemetry?.get(routePath()));
       } catch {
         return null;
       }
     }
     function connectTelemetry() {
-      if (telemetry || disposed || typeof window.__T3_MODS_TELEMETRY__?.subscribe !== "function") return;
-      telemetry = window.__T3_MODS_TELEMETRY__;
+      const api = window.__T3_MODS_TELEMETRY__;
+      if (telemetry || disposed || typeof api?.subscribe !== "function") return;
+      telemetry = api;
       try {
         unsubscribeTelemetry = telemetry.subscribe((event) => {
-          if (event?.name !== "session.usage" && event?.name !== "turn.complete") return;
+          if (event.name !== "session.usage" && event.name !== "turn.complete") return;
           const value = usageSnapshot(event.value);
           if (!value || currentUsage()?.threadId !== value.threadId) return;
           for (const runtime of runtimes.values()) runtime.emit(event.name, value);
@@ -892,37 +1050,37 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
           log(record.manifest.name, "Loaded");
           refresh();
         },
-        command: (_, command) => {
+        command: (_runtime, command) => {
           const entries = commands.get(record.manifest.id) ?? /* @__PURE__ */ new Map();
           if (entries.size >= 20 && !entries.has(command.id)) throw new Error("A mod can register up to 20 commands.");
           entries.set(command.id, command);
           commands.set(record.manifest.id, entries);
         },
-        panel: (_, panel) => {
+        panel: (_runtime, panel) => {
           if (panel) panels.set(record.manifest.id, panel);
           else panels.delete(record.manifest.id);
           renderTray();
         },
-        notify: (_, text) => notify(record.manifest.name, text),
-        theme: (_, colors) => {
+        notify: (_runtime, text) => notify(record.manifest.name, text),
+        theme: (_runtime, colors) => {
           if (colors) themes.set(record.manifest.id, colors);
           else themes.clear(record.manifest.id);
         },
-        band: (_, parts) => {
+        band: (_runtime, parts) => {
           if (parts) bands.set(record.manifest.id, parts);
           else bands.delete(record.manifest.id);
           renderBands();
         },
         usage: currentUsage,
         readDraft,
-        insertDraft: async (runtime2, text) => {
+        insertDraft: async (current, text) => {
           if (!await ask(`${record.manifest.name} wants to add to your draft`, `This text will be pasted at the end. Nothing will be sent.
 
-${text}`, "Add to draft") || runtime2.stopped) return false;
+${text}`, "Add to draft") || current.stopped) return false;
           insertDraft(text);
           return true;
         },
-        log: (_, text) => log(record.manifest.name, text),
+        log: (_runtime, text) => log(record.manifest.name, text),
         removed: () => {
           runtimes.delete(record.manifest.id);
           commands.delete(record.manifest.id);
@@ -932,7 +1090,7 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
           renderBands();
           refresh();
         },
-        fault: async (_, reason) => {
+        fault: async (_runtime, reason) => {
           record.enabled = false;
           record.quarantined = reason;
           await database.save(record);
@@ -971,7 +1129,7 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
     function openSettings() {
       const inset = document.querySelector('[data-slot="sidebar-inset"]');
       const content = inset?.firstElementChild?.lastElementChild;
-      if (!content || content.tagName === "HEADER") {
+      if (!(content instanceof HTMLElement) || content.tagName === "HEADER" || !content.parentElement) {
         open2();
         return;
       }
@@ -998,8 +1156,9 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
       try {
         await action();
       } catch (error) {
-        notify("Mods for T3 Code", error.message);
-        log("Host", error.message);
+        const text = messageText(error);
+        notify("Mods for T3 Code", text);
+        log("Host", text);
       } finally {
         busy = false;
         dialog.removeAttribute("aria-busy");
@@ -1012,9 +1171,8 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
         const installed = records.find((record) => record.manifest.id === bundle.manifest.id);
         if (installed && installed.code === bundle.code && JSON.stringify(installed.manifest) === JSON.stringify(bundle.manifest)) return;
         if (source.inbox) {
-          const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(bundle)));
-          bundle.inboxHash = [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-          if (seenInbox[bundle.inboxHash]) return;
+          bundle.inboxHash = await digestBundle(bundle);
+          if (seenInbox[bundle.inboxHash] || candidate?.inboxHash === bundle.inboxHash || candidates.some((item) => item.inboxHash === bundle.inboxHash)) return;
           if (development && installed?.enabled && installed.manifest.author === bundle.manifest.author && bundle.manifest.permissions.every((permission) => installed.manifest.permissions.includes(permission))) {
             stop(installed.manifest.id);
             const record = { ...bundle, enabled: true, quarantined: null };
@@ -1028,8 +1186,10 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
             return;
           }
         }
+        const sameBundle = (item) => item.manifest.id === bundle.manifest.id && item.code === bundle.code;
         if (candidate) {
-          if (candidates.length < 20 && !candidates.some((item) => item.manifest.id === bundle.manifest.id && item.code === bundle.code)) candidates.push(bundle);
+          if (sameBundle(candidate) || candidates.some(sameBundle)) return;
+          if (candidates.length < 20) candidates.push(bundle);
           notify("Mod inbox", `${bundle.manifest.name} is waiting for review.`);
           return;
         }
@@ -1040,7 +1200,34 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
         render();
         if (!dialog.open) dialog.showModal();
       } catch (error) {
-        notify("Cannot import mod", error.message);
+        notify("Cannot import mod", messageText(error));
+      }
+    }
+    function scheduleBundleScan() {
+      if (bundleScan !== void 0 || disposed) return;
+      bundleScan = setTimeout(() => {
+        bundleScan = void 0;
+        void scanRenderedBundles();
+      }, 400);
+    }
+    async function scanRenderedBundles() {
+      if (disposed) return;
+      const blocks = [...document.querySelectorAll("pre code")].filter((block) => block instanceof HTMLElement && !block.closest("#mods-for-t3-code-host")).slice(-MAX_RENDERED_BLOCKS);
+      for (const block of blocks) {
+        if (disposed) return;
+        const text = block.textContent ?? "";
+        if (scannedBlocks.get(block) === text.length) continue;
+        const trimmed = text.trim();
+        let bundle;
+        if (text.length <= MAX_BUNDLE_BYTES && trimmed.startsWith("{") && trimmed.includes('"t3mod/1"')) {
+          try {
+            bundle = validateBundle(JSON.parse(trimmed));
+          } catch {
+            bundle = void 0;
+          }
+        }
+        scannedBlocks.set(block, text.length);
+        if (bundle) await importCandidate(bundle, { inbox: true });
       }
     }
     function pickFile() {
@@ -1072,7 +1259,7 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
         return;
       }
       dialog.append(node("nav", { class: "tabs", "aria-label": "Mod manager" }, [["installed", "Installed"], ["examples", "Built-in"], ["commands", "Commands"], ["create", "Create"], ["console", "Activity"]].map(([key, text]) => {
-        const item = button(text, () => go(key));
+        const item = button(text ?? "", () => go(key ?? ""));
         item.setAttribute("aria-selected", String(tab === key));
         return item;
       })));
@@ -1081,7 +1268,7 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
       if (tab === "installed") {
         const list = records.map((record) => {
           const { manifest } = record;
-          const enabled = toggle(record.enabled, `Enable ${manifest.name}`, options.safeMode || busy);
+          const enabled = toggle(record.enabled, `Enable ${manifest.name}`, Boolean(options.safeMode) || busy);
           enabled.onchange = () => void run(async () => {
             stop(manifest.id);
             record.enabled = enabled.checked;
@@ -1113,7 +1300,7 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
         });
         if (!list.length) list.push(row("No mods installed", "Import a .t3mod file, or describe a mod and let your AI build it.", [button("Import", pickFile, "xs"), button("Create", () => go("create"), "xs")]));
         content.append(section("Installed", list, node("span", { class: "meta", text: options.safeMode ? "Safe mode" : `${records.length} installed \xB7 ${runtimes.size} active` })));
-        const pause = toggle(paused, "Pause all mods", options.safeMode || busy);
+        const pause = toggle(paused, "Pause all mods", Boolean(options.safeMode) || busy);
         pause.onchange = () => void run(async () => {
           paused = pause.checked;
           if (paused) for (const id of [...runtimes.keys()]) stop(id);
@@ -1138,7 +1325,7 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
         }, "xs")]));
         content.append(section("Built-in", list.length ? list : [note("No built-in mods in this build.")]), node("p", { class: "explain", text: "Included with Mods for T3 Code. A mod starts as soon as you review and install it. Themes use T3\u2019s own color tokens and restore your appearance when turned off." }));
       } else if (tab === "commands") {
-        let show = function() {
+        let show2 = function() {
           list.replaceChildren();
           for (const [id, entries] of commands) for (const command of entries.values()) {
             const runtime = runtimes.get(id);
@@ -1150,11 +1337,12 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
           }
           if (!list.childNodes.length) list.append(note(commands.size ? "No matching commands." : "Switch on a mod that registers commands to see them here."));
         };
+        var show = show2;
         const search = node("input", { type: "search", placeholder: "Find a mod command\u2026", "aria-label": "Find command" });
         const list = node("div");
         content.append(search, section("Commands", [list]));
-        search.oninput = show;
-        show();
+        search.oninput = show2;
+        show2();
       } else if (tab === "create") {
         const description = node("textarea", { placeholder: "A focus timer with a start button and a reminder after 25 minutes\u2026", "aria-label": "Describe your mod", maxLength: 5e3 });
         const request = () => {
@@ -1164,7 +1352,7 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
         content.append(section("Create with your AI", [node("div", { class: "body" }, [
           node("label", { text: "What should your mod do?" }),
           description,
-          node("p", { class: "explain", text: "Draft in T3 adds a request with the mod API to your composer; send it with your usual model. Your existing draft is kept. When your AI saves the mod, it appears here for permission review." }),
+          node("p", { class: "explain", text: "Draft in T3 adds a request with the mod API to your composer; send it with your usual model. Your existing draft is kept. The reply must include the mod JSON in one t3mod block so it can be reviewed here even when the model is not running on this computer." }),
           node("div", { class: "actions" }, [
             button("Copy request", () => void run(async () => {
               await navigator.clipboard.writeText(request());
@@ -1186,14 +1374,16 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
       }
     }
     function renderReview() {
-      const { manifest } = candidate;
+      const reviewing = candidate;
+      if (!reviewing) return;
+      const { manifest } = reviewing;
       const previous = records.find((record) => record.manifest.id === manifest.id);
       const content = node("div", { class: "content" }, [node("div", { class: "review-title" }, [node("h2", { text: detailsOnly ? manifest.name : previous ? `Review update: ${manifest.name}` : `Review ${manifest.name}` }), node("p", { class: "explain", text: manifest.description }), node("div", { class: "meta", text: `${manifest.version} \xB7 ${manifest.author}` })])]);
       const permissions = manifest.permissions.map((permission) => node("div", { class: "row permission" }, [node("div", { class: "row-text" }, [node("span", { text: PERMISSIONS[permission] }), node("code", { text: `${permission}${previous && !previous.manifest.permissions.includes(permission) ? " \u2014 new permission" : ""}` })])]));
       content.append(section(detailsOnly ? "Permissions" : "This mod asks to", permissions.length ? permissions : [note("No optional permissions.")]));
       const footer = node("div", { class: "footer actions" });
       if (detailsOnly) {
-        content.append(node("details", {}, [node("summary", { text: "JavaScript source" }), node("pre", { class: "review-code", text: candidate.code })]));
+        content.append(node("details", {}, [node("summary", { text: "JavaScript source" }), node("pre", { class: "review-code", text: reviewing.code })]));
         footer.append(button("Done", () => {
           candidate = void 0;
           detailsOnly = false;
@@ -1202,12 +1392,13 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
         dialog.append(content, footer);
         return;
       }
-      content.append(node("p", { class: "explain", text: "Install code from authors you trust. The mod starts as soon as you install it. Mod code is isolated from T3\u2019s files and credentials, but a mod can consume browser resources and use every permission listed above." }), node("details", {}, [node("summary", { text: "Review JavaScript source" }), node("pre", { class: "review-code", text: candidate.code })]));
+      content.append(node("p", { class: "explain", text: "Install code from authors you trust. The mod starts as soon as you install it. Mod code is isolated from T3\u2019s files and credentials, but a mod can consume browser resources and use every permission listed above." }), node("details", {}, [node("summary", { text: "Review JavaScript source" }), node("pre", { class: "review-code", text: reviewing.code })]));
       footer.append(button("Cancel", () => void run(async () => {
         await remember(candidate);
         candidate = candidates.shift();
       }), "xs"), button(previous ? "Update mod" : "Install mod", () => void run(async () => {
         const bundle = candidate;
+        if (!bundle) return;
         stop(manifest.id);
         const record = { ...bundle, enabled: true, quarantined: null };
         delete record.inboxHash;
@@ -1222,7 +1413,8 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
       dialog.append(content, footer);
     }
     function onInput(event) {
-      if (!event.target?.closest?.('[data-testid="composer-editor"]')) return;
+      const target = event.target;
+      if (!(target instanceof Element) || !target.closest('[data-testid="composer-editor"]')) return;
       clearTimeout(draftTimer);
       draftTimer = setTimeout(() => {
         for (const runtime of runtimes.values()) runtime.emit("draft.change", readDraft());
@@ -1233,15 +1425,15 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
     function settingsNav() {
       const content = document.querySelector('[data-sidebar="content"]') ?? document.querySelector('[data-slot="sidebar-content"]');
       const menus = content ? [...content.querySelectorAll('[data-sidebar="menu"], [data-slot="sidebar-menu"], ul')] : [];
-      return menus.find((menu2) => navItems(menu2).some((item) => /\b(general|appearance|providers|keybindings)\b/i.test(item.textContent))) ?? null;
+      return menus.find((item) => navItems(item).some((entry) => /\b(general|appearance|providers|keybindings)\b/i.test(entry.textContent ?? ""))) ?? null;
     }
-    function navItems(menu2) {
-      return [...menu2.querySelectorAll("button, a")].filter((item) => !item.closest("[data-t3mods]") && item.textContent.trim());
+    function navItems(menuRoot) {
+      return [...menuRoot.querySelectorAll("button, a")].filter((item) => !item.closest("[data-t3mods]") && Boolean(item.textContent?.trim()));
     }
     function styleSettingsControl(active) {
       const control = settingsItem?.querySelector("button");
-      if (!control) return;
-      const items = settingsItem.parentElement ? navItems(settingsItem.parentElement) : [];
+      if (!(control instanceof HTMLButtonElement)) return;
+      const items = settingsItem?.parentElement ? navItems(settingsItem.parentElement) : [];
       const isActive = (item) => item.getAttribute("data-active") === "true" || item.getAttribute("aria-current") === "page";
       const reference = (active ? items.find(isActive) : items.find((item) => !isActive(item))) ?? items[0];
       control.className = reference?.className ?? "";
@@ -1257,10 +1449,10 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
       else control.removeAttribute("aria-current");
     }
     function attachSettings() {
-      if (!location.pathname.startsWith("/settings") || settingsItem?.isConnected) return;
-      const menu2 = settingsNav();
-      if (!menu2) return;
-      const nativeItem = navItems(menu2)[0]?.closest("li");
+      if (!routePath().startsWith("/settings") || settingsItem?.isConnected) return;
+      const menuRoot = settingsNav();
+      if (!menuRoot) return;
+      const nativeItem = navItems(menuRoot)[0]?.closest("li");
       const item = node("li", { "data-t3mods": "settings-section", class: nativeItem?.className ?? "" });
       for (const name of ["data-slot", "data-sidebar"]) {
         const value = nativeItem?.getAttribute(name);
@@ -1270,7 +1462,7 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
       const control = node("button", { type: "button", onclick: openSettings }, [node("span", { text: "Mods" })]);
       control.insertAdjacentHTML("afterbegin", MODS_ICON);
       item.append(control);
-      menu2.append(item);
+      menuRoot.append(item);
       settingsItem = item;
       styleSettingsControl(Boolean(inlineContent));
     }
@@ -1286,14 +1478,17 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
     const observer = new MutationObserver(() => {
       attachSettings();
       attachPanels();
+      scheduleBundleScan();
     });
     observer.observe(document.body, { childList: true, subtree: true });
     attachSettings();
     attachPanels();
+    scheduleBundleScan();
     document.addEventListener("input", onInput, true);
     const onRoute = () => {
-      if (lastPath !== location.pathname) {
-        lastPath = location.pathname;
+      const path = routePath();
+      if (lastPath !== path) {
+        lastPath = path;
         leaveInline();
         if (settingsItem) {
           settingsItem.remove();
@@ -1312,14 +1507,14 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
     for (const key of ["pushState", "replaceState"]) {
       const original = history[key];
       const wrapped = function(...args) {
-        const result = Reflect.apply(original, this, args);
+        Reflect.apply(original, this, args);
         queueMicrotask(onRoute);
-        return result;
       };
       historyMethods.set(key, { original, wrapped });
       history[key] = wrapped;
     }
     window.addEventListener("popstate", onRoute);
+    window.addEventListener("hashchange", onRoute);
     const onKeys = (event) => {
       if (event.key !== "Escape" || !shadow.querySelector("dialog[open]")) return;
       event.stopPropagation();
@@ -1351,6 +1546,7 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
       leaveInline();
       detachSidebar();
       observer.disconnect();
+      clearTimeout(bundleScan);
       panelRoot.remove();
       bandDock.dispose();
       try {
@@ -1361,7 +1557,8 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
       clearTimeout(draftTimer);
       channel?.close();
       window.removeEventListener("popstate", onRoute);
-      for (const [key, { original, wrapped }] of historyMethods) if (history[key] === wrapped) history[key] = original;
+      window.removeEventListener("hashchange", onRoute);
+      for (const [key, method] of historyMethods) if (history[key] === method.wrapped) history[key] = method.original;
       document.removeEventListener("input", onInput, true);
       document.removeEventListener("keydown", onKeys, true);
       document.removeEventListener("pointerdown", onPointerDown, true);
@@ -1379,107 +1576,121 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
   // renderer-entry.js
   if (!window.__modsForT3Installing && !window.__modsForT3Code) {
     window.__modsForT3Installing = true;
-    mount({ examples: [{ "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "focus-timer", "version": "1.0.0", "name": "Focus timer", "description": "A small timer in the Mods tray. Start a 25 minute session and get a reminder when it ends.", "author": "Mods for T3 Code", "permissions": ["ui.panels", "ui.commands", "ui.notify"] }, "code": 'var T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/focus-timer/mod.js\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    let remaining = 25 * 60;\n    let running = false;\n    async function draw() {\n      const minutes = Math.floor(remaining / 60);\n      const seconds = String(remaining % 60).padStart(2, "0");\n      await api.panels.set({ title: `${minutes}:${seconds}`, body: running ? "One task at a time. Your focus session is running." : "Ready for a little focused work?", actions: [{ id: "toggle", label: running ? "Pause" : "Start" }, { id: "reset", label: "Reset" }] });\n    }\n    api.panels.action("toggle", async () => {\n      running = !running;\n      await draw();\n    });\n    api.panels.action("reset", async () => {\n      remaining = 25 * 60;\n      running = false;\n      await draw();\n    });\n    await api.commands.register({ id: "start", title: "Start a 25 minute focus session" }, async () => {\n      remaining = 25 * 60;\n      running = true;\n      await draw();\n    });\n    const interval = setInterval(async () => {\n      if (!running) return;\n      remaining--;\n      if (remaining <= 0) {\n        running = false;\n        await api.notify("Focus session finished. Take a short break.");\n      }\n      await draw();\n    }, 1e3);\n    await draw();\n    return () => clearInterval(interval);\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "prompt-kit", "version": "1.0.0", "name": "Prompt kit", "description": "Local commands that offer useful review and debugging prompts for your current T3 draft. Every insertion asks first.", "author": "Mods for T3 Code", "permissions": ["ui.commands", "draft.insert"] }, "code": 'var T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/prompt-kit/mod.js\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    await api.commands.register({ id: "review", title: "Draft a focused code review" }, () => api.draft.insert("Review the changes in this thread. Focus on correctness and the behavior requested. Explain any concrete issues and the smallest fix."));\n    await api.commands.register({ id: "debug", title: "Draft a debugging request" }, () => api.draft.insert("Investigate this failure. Find the smallest reproducible cause, explain it, and make a focused fix. Run only the checks needed to confirm the fix."));\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "token-weather", "version": "1.0.0", "name": "Token weather", "description": "A one-line forecast above the composer: measured context use for the open thread, a sparkline of recent completed turns, and the last turn\u2019s change.", "author": "Mods for T3 Code", "permissions": ["ui.band", "session.usage", "storage"] }, "code": 'var T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/token-weather/mod.js\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate,\n    formatTokens: () => formatTokens,\n    line: () => line,\n    weather: () => weather\n  });\n  var WEATHER = [\n    { below: 25, icon: "\\u2600", label: "Clear", tone: "yellow" },\n    { below: 50, icon: "\\u2601", label: "Cloudy", tone: "cyan" },\n    { below: 75, icon: "\\u2602", label: "Showers", tone: "blue" },\n    { below: 90, icon: "\\u2607", label: "Storm", tone: "magenta" },\n    { below: Infinity, icon: "\\u21AF", label: "Compact soon", tone: "red" }\n  ];\n  var BARS = "\\u2581\\u2582\\u2583\\u2584\\u2585\\u2586\\u2587\\u2588";\n  var MAX_TURNS = 12;\n  var MAX_THREADS = 40;\n  function formatTokens(value) {\n    if (value < 1e3) return String(value);\n    if (value < 999950) return `${(value / 1e3).toFixed(1).replace(/\\.0$/, "")}k`;\n    return `${(value / 1e6).toFixed(2).replace(/\\.?0+$/, "")}M`;\n  }\n  function weather(percent) {\n    return WEATHER.find((item) => percent < item.below);\n  }\n  function turnKey(turnId) {\n    let hash = 2166136261;\n    for (let index = 0; index < turnId.length; index++) hash = Math.imul(hash ^ turnId.charCodeAt(index), 16777619);\n    return (hash >>> 0).toString(36);\n  }\n  function line(snapshot, turns) {\n    if (!snapshot) return [{ text: "\\u25CC Context usage unavailable for this view", tone: "muted" }];\n    const parts = [];\n    let tone = "muted";\n    if (snapshot.maxTokens) {\n      const percent = Math.floor(snapshot.usedTokens / snapshot.maxTokens * 100);\n      const forecast = weather(percent);\n      tone = forecast.tone;\n      parts.push({ text: `${forecast.icon} ${forecast.label}`, tone }, { text: `  ${percent}%` }, { text: `  ${formatTokens(snapshot.usedTokens)} / ${formatTokens(snapshot.maxTokens)}`, tone: "muted" });\n    } else {\n      parts.push({ text: "\\u25CC Window unknown", tone: "muted" }, { text: `  ${formatTokens(snapshot.usedTokens)} used \\xB7 window size unavailable`, tone: "muted" });\n    }\n    if (turns.length) {\n      const scale = snapshot.maxTokens ?? Math.max(...turns, 1);\n      parts.push({ text: `  ${turns.map((used) => BARS[Math.min(7, Math.round(used / scale * 7))]).join("")}`, tone });\n    }\n    if (turns.length === 1) parts.push({ text: "  \\u0394 unknown (first turn)", tone: "muted" });\n    else if (turns.length > 1) {\n      const delta = turns.at(-1) - turns.at(-2);\n      parts.push(delta >= 0 ? { text: `  \\u25B2 +${formatTokens(delta)} last turn` } : { text: `  \\u25BC \\u2212${formatTokens(-delta)} last turn`, tone: "cyan" });\n    }\n    return parts;\n  }\n  async function activate(api) {\n    const threads = /* @__PURE__ */ new Map();\n    const saved = await api.storage.get("history");\n    if (saved?.version === 1 && Array.isArray(saved.threads)) {\n      for (const item of saved.threads.slice(-MAX_THREADS)) {\n        if (!Array.isArray(item) || typeof item[0] !== "string" || !Array.isArray(item[1])) continue;\n        const turns = item[1].filter((turn) => Array.isArray(turn) && typeof turn[0] === "string" && Number.isSafeInteger(turn[1]) && turn[1] >= 0).slice(-MAX_TURNS);\n        threads.set(item[0], turns);\n      }\n    }\n    let current = await api.session.usage();\n    let shown = "";\n    function record(snapshot) {\n      if (!snapshot?.complete || !snapshot.turnId) return;\n      const turns = threads.get(snapshot.threadId) ?? [];\n      const key = turnKey(snapshot.turnId);\n      const existing = turns.find((turn) => turn[0] === key);\n      if (existing) {\n        if (existing[1] === snapshot.usedTokens) return;\n        existing[1] = snapshot.usedTokens;\n      } else turns.push([key, snapshot.usedTokens]);\n      threads.delete(snapshot.threadId);\n      threads.set(snapshot.threadId, turns.slice(-MAX_TURNS));\n      while (threads.size > MAX_THREADS) threads.delete(threads.keys().next().value);\n      void api.storage.set("history", { version: 1, threads: [...threads] });\n    }\n    async function draw() {\n      const parts = line(current, current ? (threads.get(current.threadId) ?? []).map((turn) => turn[1]) : []);\n      const text = JSON.stringify(parts);\n      if (text === shown) return;\n      shown = text;\n      await api.band.set(parts);\n    }\n    async function update(snapshot) {\n      current = snapshot;\n      record(snapshot);\n      await draw();\n    }\n    api.on("session.usage", update);\n    api.on("turn.complete", update);\n    record(current);\n    await draw();\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "midnight-theme", "version": "1.0.0", "name": "Midnight blue", "description": "A calm dark palette using T3\u2019s native theme tokens. Turning it off restores your normal appearance.", "author": "Mods for T3 Code", "permissions": ["ui.theme"] }, "code": 'var T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/midnight-theme/mod.js\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    await api.theme.set({\n      background: "#17212f",\n      foreground: "#edf2f8",\n      card: "#1d2939",\n      "card-foreground": "#edf2f8",\n      popover: "#253348",\n      "popover-foreground": "#edf2f8",\n      primary: "#8db9ef",\n      "primary-foreground": "#152033",\n      secondary: "#263750",\n      "secondary-foreground": "#edf2f8",\n      muted: "#243247",\n      "muted-foreground": "#b8c5d8",\n      accent: "#304562",\n      "accent-foreground": "#edf2f8",\n      border: "#3e526d",\n      input: "#435872",\n      ring: "#8db9ef",\n      sidebar: "#131d2b",\n      "sidebar-foreground": "#edf2f8",\n      "sidebar-accent": "#304562",\n      "sidebar-accent-foreground": "#edf2f8",\n      "sidebar-border": "#3e526d",\n      "sidebar-ring": "#8db9ef"\n    });\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "paper-theme", "version": "1.0.0", "name": "Quiet paper", "description": "A soft light palette with blue controls. Uses T3\u2019s own tokens and restores the original theme when disabled.", "author": "Mods for T3 Code", "permissions": ["ui.theme"] }, "code": 'var T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/paper-theme/mod.js\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    await api.theme.set({\n      background: "#f5f6f8",\n      foreground: "#253044",\n      card: "#ffffff",\n      "card-foreground": "#253044",\n      popover: "#ffffff",\n      "popover-foreground": "#253044",\n      primary: "#284f88",\n      "primary-foreground": "#ffffff",\n      secondary: "#e7ecf3",\n      "secondary-foreground": "#253044",\n      muted: "#edf0f4",\n      "muted-foreground": "#536176",\n      accent: "#dce5f2",\n      "accent-foreground": "#253044",\n      border: "#c8d2df",\n      input: "#becbdb",\n      ring: "#284f88",\n      sidebar: "#e7ecf3",\n      "sidebar-foreground": "#253044",\n      "sidebar-accent": "#dce5f2",\n      "sidebar-accent-foreground": "#253044",\n      "sidebar-border": "#c8d2df",\n      "sidebar-ring": "#284f88"\n    });\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }], ...window.__MODS_FOR_T3_OPTIONS__, sandboxDocument: `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; connect-src 'none'; img-src 'none'; style-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'"><title>Isolated mod runtime</title></head><body><script>// This trusted bootstrap lives in an opaque-origin iframe. Mod code only runs
-// in its dedicated worker; the host can kill that worker even if it loops.
+    mount({ examples: [{ "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "focus-timer", "version": "1.0.0", "name": "Focus timer", "description": "A small timer in the Mods tray. Start a 25 minute session and get a reminder when it ends.", "author": "Mods for T3 Code", "permissions": ["ui.panels", "ui.commands", "ui.notify"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/focus-timer/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    let remaining = 25 * 60;\n    let running = false;\n    async function draw() {\n      const minutes = Math.floor(remaining / 60);\n      const seconds = String(remaining % 60).padStart(2, "0");\n      await api.panels.set({ title: `${minutes}:${seconds}`, body: running ? "One task at a time. Your focus session is running." : "Ready for a little focused work?", actions: [{ id: "toggle", label: running ? "Pause" : "Start" }, { id: "reset", label: "Reset" }] });\n    }\n    api.panels.action("toggle", async () => {\n      running = !running;\n      await draw();\n    });\n    api.panels.action("reset", async () => {\n      remaining = 25 * 60;\n      running = false;\n      await draw();\n    });\n    await api.commands.register({ id: "start", title: "Start a 25 minute focus session" }, async () => {\n      remaining = 25 * 60;\n      running = true;\n      await draw();\n    });\n    const interval = setInterval(() => {\n      void (async () => {\n        if (!running) return;\n        remaining--;\n        if (remaining <= 0) {\n          running = false;\n          await api.notify("Focus session finished. Take a short break.");\n        }\n        await draw();\n      })();\n    }, 1e3);\n    await draw();\n    return () => clearInterval(interval);\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "prompt-kit", "version": "1.0.0", "name": "Prompt kit", "description": "Local commands that offer useful review and debugging prompts for your current T3 draft. Every insertion asks first.", "author": "Mods for T3 Code", "permissions": ["ui.commands", "draft.insert"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/prompt-kit/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    await api.commands.register({ id: "review", title: "Draft a focused code review" }, () => api.draft.insert("Review the changes in this thread. Focus on correctness and the behavior requested. Explain any concrete issues and the smallest fix."));\n    await api.commands.register({ id: "debug", title: "Draft a debugging request" }, () => api.draft.insert("Investigate this failure. Find the smallest reproducible cause, explain it, and make a focused fix. Run only the checks needed to confirm the fix."));\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "token-weather", "version": "1.0.0", "name": "Token weather", "description": "A one-line forecast above the composer: measured context use for the open thread, a sparkline of recent completed turns, and the last turn\u2019s change.", "author": "Mods for T3 Code", "permissions": ["ui.band", "session.usage", "storage"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/token-weather/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate,\n    formatTokens: () => formatTokens,\n    line: () => line,\n    weather: () => weather\n  });\n  var WEATHER = [\n    { below: 25, icon: "\\u2600", label: "Clear", tone: "yellow" },\n    { below: 50, icon: "\\u2601", label: "Cloudy", tone: "cyan" },\n    { below: 75, icon: "\\u2602", label: "Showers", tone: "blue" },\n    { below: 90, icon: "\\u2607", label: "Storm", tone: "magenta" },\n    { below: Infinity, icon: "\\u21AF", label: "Compact soon", tone: "red" }\n  ];\n  var BARS = "\\u2581\\u2582\\u2583\\u2584\\u2585\\u2586\\u2587\\u2588";\n  var MAX_TURNS = 12;\n  var MAX_THREADS = 40;\n  function formatTokens(value) {\n    if (value < 1e3) return String(value);\n    if (value < 999950) return `${(value / 1e3).toFixed(1).replace(/\\.0$/, "")}k`;\n    return `${(value / 1e6).toFixed(2).replace(/\\.?0+$/, "")}M`;\n  }\n  function weather(percent) {\n    const forecast = WEATHER.find((item) => percent < item.below);\n    if (forecast) return forecast;\n    const fallback = WEATHER[WEATHER.length - 1];\n    if (!fallback) throw new Error("Weather scale is empty.");\n    return fallback;\n  }\n  function turnKey(turnId) {\n    let hash = 2166136261;\n    for (let index = 0; index < turnId.length; index++) hash = Math.imul(hash ^ turnId.charCodeAt(index), 16777619);\n    return (hash >>> 0).toString(36);\n  }\n  function line(snapshot, turns) {\n    if (!snapshot) return [{ text: "\\u25CC Context usage unavailable for this view", tone: "muted" }];\n    const parts = [];\n    let tone = "muted";\n    if (snapshot.maxTokens) {\n      const percent = Math.floor(snapshot.usedTokens / snapshot.maxTokens * 100);\n      const forecast = weather(percent);\n      tone = forecast.tone;\n      parts.push({ text: `${forecast.icon} ${forecast.label}`, tone }, { text: `  ${percent}%` }, { text: `  ${formatTokens(snapshot.usedTokens)} / ${formatTokens(snapshot.maxTokens)}`, tone: "muted" });\n    } else {\n      parts.push({ text: "\\u25CC Window unknown", tone: "muted" }, { text: `  ${formatTokens(snapshot.usedTokens)} used \\xB7 window size unavailable`, tone: "muted" });\n    }\n    if (turns.length) {\n      const scale = snapshot.maxTokens ?? Math.max(...turns, 1);\n      parts.push({ text: `  ${turns.map((used) => BARS[Math.min(7, Math.round(used / scale * 7))] ?? "").join("")}`, tone });\n    }\n    if (turns.length === 1) parts.push({ text: "  \\u0394 unknown (first turn)", tone: "muted" });\n    else if (turns.length > 1) {\n      const latest = turns.at(-1);\n      const prior = turns.at(-2);\n      if (latest !== void 0 && prior !== void 0) {\n        const delta = latest - prior;\n        parts.push(delta >= 0 ? { text: `  \\u25B2 +${formatTokens(delta)} last turn` } : { text: `  \\u25BC \\u2212${formatTokens(-delta)} last turn`, tone: "cyan" });\n      }\n    }\n    return parts;\n  }\n  function isRecord(value) {\n    return typeof value === "object" && value !== null && !Array.isArray(value);\n  }\n  function readTurn(value) {\n    if (!Array.isArray(value) || typeof value[0] !== "string" || typeof value[1] !== "number") return null;\n    if (!Number.isSafeInteger(value[1]) || value[1] < 0) return null;\n    return [value[0], value[1]];\n  }\n  function historyPayload(threads) {\n    const encoded = [];\n    for (const [threadId, turns] of threads) encoded.push([threadId, turns.map((turn) => [turn[0], turn[1]])]);\n    return { version: 1, threads: encoded };\n  }\n  async function activate(api) {\n    const threads = /* @__PURE__ */ new Map();\n    const saved = await api.storage.get("history");\n    if (isRecord(saved) && saved.version === 1 && Array.isArray(saved.threads)) {\n      for (const item of saved.threads.slice(-MAX_THREADS)) {\n        if (!Array.isArray(item) || typeof item[0] !== "string" || !Array.isArray(item[1])) continue;\n        const turns = [];\n        for (const turn of item[1]) {\n          const stored = readTurn(turn);\n          if (stored) turns.push(stored);\n        }\n        threads.set(item[0], turns.slice(-MAX_TURNS));\n      }\n    }\n    let current = await api.session.usage();\n    let shown = "";\n    function record(snapshot) {\n      if (!snapshot?.complete || !snapshot.turnId) return;\n      const turns = threads.get(snapshot.threadId) ?? [];\n      const key = turnKey(snapshot.turnId);\n      const existing = turns.find((turn) => turn[0] === key);\n      if (existing) {\n        if (existing[1] === snapshot.usedTokens) return;\n        existing[1] = snapshot.usedTokens;\n      } else turns.push([key, snapshot.usedTokens]);\n      threads.delete(snapshot.threadId);\n      threads.set(snapshot.threadId, turns.slice(-MAX_TURNS));\n      while (threads.size > MAX_THREADS) {\n        const oldest = threads.keys().next().value;\n        if (oldest === void 0) break;\n        threads.delete(oldest);\n      }\n      void api.storage.set("history", historyPayload(threads));\n    }\n    async function draw() {\n      const parts = line(current, current ? (threads.get(current.threadId) ?? []).map((turn) => turn[1]) : []);\n      const text = JSON.stringify(parts);\n      if (text === shown) return;\n      shown = text;\n      await api.band.set(parts);\n    }\n    async function update(snapshot) {\n      current = snapshot;\n      record(snapshot);\n      await draw();\n    }\n    api.on("session.usage", update);\n    api.on("turn.complete", (snapshot) => update(snapshot));\n    record(current);\n    await draw();\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "midnight-theme", "version": "1.0.0", "name": "Midnight blue", "description": "A calm dark palette using T3\u2019s native theme tokens. Turning it off restores your normal appearance.", "author": "Mods for T3 Code", "permissions": ["ui.theme"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/midnight-theme/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    await api.theme.set({\n      background: "#17212f",\n      foreground: "#edf2f8",\n      card: "#1d2939",\n      "card-foreground": "#edf2f8",\n      popover: "#253348",\n      "popover-foreground": "#edf2f8",\n      primary: "#8db9ef",\n      "primary-foreground": "#152033",\n      secondary: "#263750",\n      "secondary-foreground": "#edf2f8",\n      muted: "#243247",\n      "muted-foreground": "#b8c5d8",\n      accent: "#304562",\n      "accent-foreground": "#edf2f8",\n      border: "#3e526d",\n      input: "#435872",\n      ring: "#8db9ef",\n      sidebar: "#131d2b",\n      "sidebar-foreground": "#edf2f8",\n      "sidebar-accent": "#304562",\n      "sidebar-accent-foreground": "#edf2f8",\n      "sidebar-border": "#3e526d",\n      "sidebar-ring": "#8db9ef"\n    });\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "paper-theme", "version": "1.0.0", "name": "Quiet paper", "description": "A soft light palette with blue controls. Uses T3\u2019s own tokens and restores the original theme when disabled.", "author": "Mods for T3 Code", "permissions": ["ui.theme"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/paper-theme/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    await api.theme.set({\n      background: "#f5f6f8",\n      foreground: "#253044",\n      card: "#ffffff",\n      "card-foreground": "#253044",\n      popover: "#ffffff",\n      "popover-foreground": "#253044",\n      primary: "#284f88",\n      "primary-foreground": "#ffffff",\n      secondary: "#e7ecf3",\n      "secondary-foreground": "#253044",\n      muted: "#edf0f4",\n      "muted-foreground": "#536176",\n      accent: "#dce5f2",\n      "accent-foreground": "#253044",\n      border: "#c8d2df",\n      input: "#becbdb",\n      ring: "#284f88",\n      sidebar: "#e7ecf3",\n      "sidebar-foreground": "#253044",\n      "sidebar-accent": "#dce5f2",\n      "sidebar-accent-foreground": "#253044",\n      "sidebar-border": "#c8d2df",\n      "sidebar-ring": "#284f88"\n    });\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }], ...window.__MODS_FOR_T3_OPTIONS__, sandboxDocument: `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; connect-src 'none'; img-src 'none'; style-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'"><title>Isolated mod runtime</title></head><body><script>"use strict";
 (() => {
-  let initialized = false;
-  window.addEventListener("message", (event) => {
-    if (initialized || event.source !== parent || event.data?.type !== "t3mods.connect" || !event.ports[0]) return;
-    initialized = true;
-    const port = event.ports[0];
-    let worker;
-    let blobUrl;
-    port.onmessage = ({ data }) => {
-      if (data.type === "init") {
-        const source = workerBootstrap.toString();
-        blobUrl = URL.createObjectURL(new Blob([\`"use strict";\\n\${data.code}\\n;(\${source})(globalThis.T3Mod);\`], { type: "text/javascript" }));
-        worker = new Worker(blobUrl);
-        worker.onmessage = ({ data: message }) => port.postMessage(message);
-        worker.onerror = (error) => port.postMessage({ type: "fault", error: error.message || "Mod worker failed." });
-        worker.postMessage(data);
-      } else if (data.type === "stop") {
-        worker?.terminate();
-        if (blobUrl) URL.revokeObjectURL(blobUrl);
-        port.close();
-      } else worker?.postMessage(data);
-    };
-    port.start();
-    port.postMessage({ type: "connected" });
-  });
-
-  function workerBootstrap(mod) {
-    let sequence = 0;
-    const pending = new Map();
-    const events = new Map();
-    const commands = new Map();
-    const actions = new Map();
-    let cleanup;
-    function call(method, args) {
-      return new Promise((resolve, reject) => {
-        const id = ++sequence;
-        const timer = method === "draft.insert" ? null : setTimeout(() => { pending.delete(id); reject(new Error("Host request timed out.")); }, 10000);
-        pending.set(id, { resolve, reject, timer });
-        postMessage({ type: "call", id, method, args });
-      });
-    }
-    const api = Object.freeze({
-      on(event, callback) {
-        if (typeof callback !== "function") throw new Error("An event needs a callback.");
-        const callbacks = events.get(event) ?? new Set();
-        callbacks.add(callback); events.set(event, callbacks);
-        call("events.subscribe", [event]).catch((error) => postMessage({ type: "fault", error: error.message }));
-        return () => callbacks.delete(callback);
-      },
-      commands: Object.freeze({
-        async register(command, callback) {
-          commands.set(command.id, callback);
-          await call("commands.register", [command]);
-        },
-      }),
-      panels: Object.freeze({
-        set: (panel) => call("panels.set", [panel]),
-        clear: () => call("panels.clear", []),
-        action(id, callback) { actions.set(id, callback); },
-      }),
-      notify: (message) => call("notify", [message]),
-      theme: Object.freeze({ set: (colors) => call("theme.set", [colors]), clear: () => call("theme.clear", []) }),
-      band: Object.freeze({ set: (parts) => call("band.set", [parts]), clear: () => call("band.clear", []) }),
-      session: Object.freeze({ usage: () => call("session.usage", []) }),
-      route: Object.freeze({ get: () => call("route.get", []) }),
-      draft: Object.freeze({ read: () => call("draft.read", []), insert: (text) => call("draft.insert", [text]) }),
-      storage: Object.freeze({ get: (key) => call("storage.get", [key]), set: (key, value) => call("storage.set", [key, value]) }),
-      log: (message) => call("log", [String(message)]),
-    });
-    const heartbeat = setInterval(() => postMessage({ type: "heartbeat" }), 1000);
-    self.onmessage = async ({ data }) => {
-      if (data.type === "result") {
-        const waiter = pending.get(data.id);
-        if (!waiter) return;
-        pending.delete(data.id); clearTimeout(waiter.timer);
-        if (data.error) waiter.reject(new Error(data.error)); else waiter.resolve(data.value);
-        return;
-      }
-      try {
+  // payload/public/sandbox.ts
+  (() => {
+    let initialized = false;
+    window.addEventListener("message", (event) => {
+      if (initialized || event.source !== parent || event.data?.type !== "t3mods.connect" || !event.ports[0]) return;
+      initialized = true;
+      const port = event.ports[0];
+      let worker;
+      let blobUrl;
+      port.onmessage = ({ data }) => {
         if (data.type === "init") {
-          if (typeof mod?.activate !== "function") throw new Error("Export an activate(api) function.");
-          cleanup = await mod.activate(api);
-          postMessage({ type: "ready" });
-        } else if (data.type === "event") {
-          for (const callback of events.get(data.name) ?? []) await callback(data.value);
-        } else if (data.type === "invoke") {
-          const callback = (data.kind === "command" ? commands : actions).get(data.id);
-          if (typeof callback !== "function") throw new Error("Unknown mod action.");
-          await callback();
-        } else if (data.type === "dispose") {
-          clearInterval(heartbeat);
-          if (typeof cleanup === "function") await cleanup();
-        }
-        if (data.requestId) postMessage({ type: "done", requestId: data.requestId });
-      } catch (error) {
-        postMessage({ type: "fault", error: error instanceof Error ? error.message : String(error) });
+          const source = workerBootstrap.toString();
+          blobUrl = URL.createObjectURL(new Blob([\`"use strict";
+\${data.code}
+;(\${source})(globalThis.T3Mod);\`], { type: "text/javascript" }));
+          worker = new Worker(blobUrl);
+          worker.onmessage = ({ data: message }) => port.postMessage(message);
+          worker.onerror = (error) => port.postMessage({ type: "fault", error: error.message || "Mod worker failed." });
+          worker.postMessage(data);
+        } else if (data.type === "stop") {
+          worker?.terminate();
+          if (blobUrl) URL.revokeObjectURL(blobUrl);
+          port.close();
+        } else worker?.postMessage(data);
+      };
+      port.start();
+      port.postMessage({ type: "connected" });
+    });
+    function workerBootstrap(mod) {
+      const scope = globalThis;
+      let sequence = 0;
+      const pending = /* @__PURE__ */ new Map();
+      const events = /* @__PURE__ */ new Map();
+      const commands = /* @__PURE__ */ new Map();
+      const actions = /* @__PURE__ */ new Map();
+      let cleanup;
+      function call(method, args) {
+        return new Promise((resolve, reject) => {
+          const id = ++sequence;
+          const timer = method === "draft.insert" ? null : setTimeout(() => {
+            pending.delete(id);
+            reject(new Error("Host request timed out."));
+          }, 1e4);
+          pending.set(id, { resolve: (value) => resolve(value), reject, timer });
+          scope.postMessage({ type: "call", id, method, args });
+        });
       }
-    };
-  }
+      const api = Object.freeze({
+        on(event, callback) {
+          if (typeof callback !== "function") throw new Error("An event needs a callback.");
+          const callbacks = events.get(event) ?? /* @__PURE__ */ new Set();
+          callbacks.add(callback);
+          events.set(event, callbacks);
+          call("events.subscribe", [event]).catch((error) => scope.postMessage({ type: "fault", error: error instanceof Error ? error.message : String(error) }));
+          return () => {
+            callbacks.delete(callback);
+          };
+        },
+        commands: Object.freeze({
+          async register(command, callback) {
+            commands.set(command.id, callback);
+            await call("commands.register", [command]);
+          }
+        }),
+        panels: Object.freeze({
+          set: (panel) => call("panels.set", [panel]),
+          clear: () => call("panels.clear", []),
+          action(id, callback) {
+            actions.set(id, callback);
+          }
+        }),
+        notify: (message) => call("notify", [message]),
+        theme: Object.freeze({ set: (colors) => call("theme.set", [colors]), clear: () => call("theme.clear", []) }),
+        band: Object.freeze({ set: (parts) => call("band.set", [parts]), clear: () => call("band.clear", []) }),
+        session: Object.freeze({ usage: () => call("session.usage", []) }),
+        route: Object.freeze({ get: () => call("route.get", []) }),
+        draft: Object.freeze({ read: () => call("draft.read", []), insert: (text) => call("draft.insert", [text]) }),
+        storage: Object.freeze({ get: (key) => call("storage.get", [key]), set: (key, value) => call("storage.set", [key, value]) }),
+        log: (message) => call("log", [String(message)])
+      });
+      const heartbeat = setInterval(() => scope.postMessage({ type: "heartbeat" }), 1e3);
+      scope.onmessage = async ({ data }) => {
+        if (data.type === "result") {
+          const waiter = pending.get(data.id);
+          if (!waiter) return;
+          pending.delete(data.id);
+          if (waiter.timer !== null) clearTimeout(waiter.timer);
+          if (data.error) waiter.reject(new Error(data.error));
+          else waiter.resolve(data.value);
+          return;
+        }
+        try {
+          if (data.type === "init") {
+            if (typeof mod?.activate !== "function") throw new Error("Export an activate(api) function.");
+            cleanup = await mod.activate(api);
+            scope.postMessage({ type: "ready" });
+          } else if (data.type === "event") {
+            for (const callback of events.get(data.name) ?? []) await callback(data.value);
+          } else if (data.type === "invoke") {
+            const callback = (data.kind === "command" ? commands : actions).get(data.id);
+            if (typeof callback !== "function") throw new Error("Unknown mod action.");
+            await callback();
+          } else if (data.type === "dispose") {
+            clearInterval(heartbeat);
+            if (typeof cleanup === "function") await cleanup();
+          }
+          if ("requestId" in data && data.requestId) scope.postMessage({ type: "done", requestId: data.requestId });
+        } catch (error) {
+          scope.postMessage({ type: "fault", error: error instanceof Error ? error.message : String(error) });
+        }
+      };
+    }
+  })();
 })();
 <\/script></body></html>` }).catch((error) => console.error("[Mods for T3 Code]", error)).finally(() => {
       delete window.__modsForT3Installing;

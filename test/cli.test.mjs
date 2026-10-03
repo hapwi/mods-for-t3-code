@@ -7,9 +7,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createPackageWithOptions } from "@electron/asar";
-import { readEntry } from "../src/archive.mjs";
+import { readEntry } from "../src/archive.ts";
 const execute = promisify(execFile);
-const cli = fileURLToPath(new URL("../bin/cli.mjs", import.meta.url));
+const cli = fileURLToPath(new URL("../dist/cli.mjs", import.meta.url));
 
 test("direct Linux CLI remembers install, reapplies after upstream update, and restores current version", { skip: process.platform !== "linux" }, async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "t3-mods-cli-"));

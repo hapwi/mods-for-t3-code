@@ -5,7 +5,7 @@
   "type": "module",
   "license": "MIT",
   "bin": {
-    "mods-for-t3-code": "bin/cli.mjs"
+    "mods-for-t3-code": "dist/cli.mjs"
   },
   "exports": {
     "./sdk": "./sdk.d.ts"
@@ -24,9 +24,10 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "demo": "node scripts/demo.mjs",
-    "pack:examples": "node bin/cli.mjs pack examples/focus-timer --out demo/focus-timer.t3mod && node bin/cli.mjs pack examples/prompt-kit --out demo/prompt-kit.t3mod",
-    "build": "node scripts/build.mjs"
+    "demo": "node scripts/demo.ts",
+    "pack:examples": "node dist/cli.mjs pack examples/focus-timer --out demo/focus-timer.t3mod && node dist/cli.mjs pack examples/prompt-kit --out demo/prompt-kit.t3mod",
+    "build": "node scripts/build.ts",
+    "typecheck": "tsc --noEmit"
   },
   "engines": {
     "node": ">=22.18.0"
@@ -44,6 +45,8 @@
     "url": "https://github.com/hapwi/mods-for-t3-code/issues"
   },
   "devDependencies": {
-    "@electron/asar": "4.3.1"
+    "@electron/asar": "4.3.1",
+    "@types/node": "^26.6.4",
+    "typescript": "^7.0.2"
   }
 }

@@ -37,7 +37,7 @@ try {
   Expand-Archive $zip -DestinationPath $work
   $tool = Join-Path $tools "package-$revision"
   if (!(Test-Path $tool)) { Move-Item (Join-Path $work "mods-for-t3-code-$revision") $tool }
-  $cli = Join-Path $tool 'bin/cli.mjs'
+  $cli = Join-Path $tool 'dist/cli.mjs'
   if ($T3Directory) { & $node $cli install --windows-dir $T3Directory } else { & $node $cli install }
   if ($LASTEXITCODE -ne 0) { throw 'The patch was not installed. Any failed replacement is rolled back.' }
   $launcher = Join-Path $tools 'mods-for-t3-code.cmd'

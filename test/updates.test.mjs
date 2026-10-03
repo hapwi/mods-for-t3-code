@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compareVersions, selectRelease, upstreamInstallOptions } from "../src/updates.mjs";
-import { nativeInstallChanged } from "../src/platform.mjs";
+import { compareVersions, selectRelease, upstreamInstallOptions } from "../src/updates.ts";
+import { nativeInstallChanged } from "../src/platform.ts";
 
 test("updates never downgrade versions or silently move stable users to nightly", () => {
   assert.equal(compareVersions("0.0.46-nightly.20261003.2624", "0.0.46-nightly.20261003.2623"), 1);

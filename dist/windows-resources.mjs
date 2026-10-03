@@ -1,4 +1,4 @@
-// src/windows-resources.mjs
+// src/windows-resources.ts
 import { readFile, writeFile } from "node:fs/promises";
 
 // node_modules/pe-library/dist/format/FormatBase.js
@@ -4916,13 +4916,13 @@ var SpcPeImageAttributeTypeAndOptionalValue = (
   })(SpcAttributeTypeAndOptionalValue)
 );
 
-// src/windows-resources.mjs
+// src/windows-resources.ts
 async function update(executable, digest) {
   const binary = NtExecutable_default.from(await readFile(executable), { ignoreCert: true });
   const resources = NtExecutableResource_default.from(binary);
   const matches = resources.entries.filter((value2) => String(value2.type).toUpperCase() === "INTEGRITY" && String(value2.id).toUpperCase() === "ELECTRONASAR");
   const value = new TextEncoder().encode(JSON.stringify([{ file: "resources\\app.asar", alg: "sha256", value: digest }])).buffer;
-  if (matches.length) for (const entry of matches) entry.bin = value;
+  if (matches.length) for (const resource of matches) resource.bin = value;
   else resources.entries.push({ type: "INTEGRITY", id: "ELECTRONASAR", lang: 1033, codepage: 1200, bin: value });
   resources.outputResource(binary);
   await writeFile(executable, Buffer.from(binary.generate()));

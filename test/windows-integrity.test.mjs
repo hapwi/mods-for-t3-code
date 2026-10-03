@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { NtExecutable, NtExecutableResource } from "resedit";
-import { update } from "../src/windows-resources.mjs";
+import { update } from "../src/windows-resources.ts";
 
 test("Windows patch writes Electron integrity resource and retains unrelated resources", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "t3-mods-pe-"));

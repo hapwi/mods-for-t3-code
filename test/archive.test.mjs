@@ -4,8 +4,8 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createPackageWithOptions, extractFile, getRawHeader, uncacheAll } from "@electron/asar";
-import { readEntry, replaceEntry, sha256 } from "../src/archive.mjs";
-import { patchArchive, restoreArchive } from "../src/install.mjs";
+import { readEntry, replaceEntry, sha256 } from "../src/archive.ts";
+import { patchArchive, restoreArchive } from "../src/install.ts";
 
 test("patch and restore preserve unrelated entries, native unpacked flags, and exact archive bytes", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "t3-mods-archive-"));
