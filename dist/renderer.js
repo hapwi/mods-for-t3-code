@@ -375,51 +375,115 @@
       }
     };
   }
+  var MODS_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3h4v4a2 2 0 1 0 4 0V3h5v7h-4a2 2 0 1 0 0 4h4v7h-7v-4a2 2 0 1 0-4 0v4H3v-7h4a2 2 0 1 0 0-4H3V3h5Z"/></svg>';
+  var UTILITY_PAGE = /^\/(settings|usage|pull-requests)(\/|$)/;
+  function sidebarFooter() {
+    return document.querySelector('[data-sidebar="footer"]') ?? document.querySelector('[data-slot="sidebar-footer"]');
+  }
+  function footerReference(footer) {
+    const icons = [...footer.querySelectorAll("button[aria-label]")].filter((item) => !item.closest("[data-t3mods]") && !item.textContent.trim() && item.querySelector("svg"));
+    const menuButtons = icons.filter((item) => item.classList.contains("peer/menu-button") || item.getAttribute("data-sidebar") === "menu-button" || item.getAttribute("data-slot") === "sidebar-menu-button");
+    return menuButtons.at(-1) ?? icons.at(-1) ?? null;
+  }
+  function attachTooltip(target, label) {
+    let tip;
+    let timer;
+    function hide() {
+      clearTimeout(timer);
+      tip?.remove();
+      tip = void 0;
+    }
+    function show() {
+      if (tip || !target.isConnected) return;
+      tip = document.createElement("div");
+      tip.dataset.t3mods = "tooltip";
+      tip.setAttribute("role", "tooltip");
+      tip.textContent = label;
+      tip.style.cssText = "position:fixed;z-index:2147483000;pointer-events:none;padding:4px 8px;border:1px solid var(--border,#ffffff1a);border-radius:calc(var(--radius,.625rem) - 2px);background:var(--popover,#1c1c1f);color:var(--popover-foreground,var(--foreground,#f5f5f5));font:12px/16px var(--font-sans,system-ui,sans-serif);white-space:nowrap;box-shadow:0 4px 12px #0000000d";
+      document.body.append(tip);
+      const box = target.getBoundingClientRect();
+      const left = Math.max(4, Math.min(innerWidth - tip.offsetWidth - 4, box.left + box.width / 2 - tip.offsetWidth / 2));
+      tip.style.left = `${left}px`;
+      tip.style.top = `${Math.max(4, box.top - tip.offsetHeight - 6)}px`;
+    }
+    const delayed = () => {
+      clearTimeout(timer);
+      timer = setTimeout(show, 400);
+    };
+    target.addEventListener("pointerenter", delayed);
+    target.addEventListener("pointerleave", hide);
+    target.addEventListener("focus", () => {
+      if (target.matches(":focus-visible")) show();
+    });
+    target.addEventListener("blur", hide);
+    target.addEventListener("click", hide);
+    return hide;
+  }
   function attachSidebarButton(open2) {
-    let button2;
+    const label = "Mods";
+    const button2 = document.createElement("button");
+    button2.type = "button";
+    button2.dataset.t3mods = "sidebar-button";
+    button2.setAttribute("aria-label", label);
+    button2.innerHTML = MODS_ICON;
+    button2.onclick = open2;
+    const hideTip = attachTooltip(button2, label);
+    const item = document.createElement("li");
+    item.dataset.t3mods = "sidebar-item";
+    let reference;
     let frame;
+    function mirror(native) {
+      if (reference === native) return;
+      reference = native;
+      button2.className = native.className;
+      for (const { name } of [...button2.attributes]) if (name.startsWith("data-") && name !== "data-t3mods") button2.removeAttribute(name);
+      for (const { name, value } of native.attributes) if (/^data-(slot|sidebar|size|variant)$/.test(name)) button2.setAttribute(name, value);
+      button2.style.cssText = "";
+      const nativeItem = native.closest("li");
+      item.className = nativeItem?.className ?? "";
+      item.style.cssText = nativeItem ? "" : "list-style:none;display:flex;flex-shrink:0";
+    }
+    function place(target) {
+      if (target.nextSibling !== item) target.after(item);
+    }
     function attach() {
       frame = void 0;
-      const footer = document.querySelector('[data-sidebar="footer"]') ?? document.querySelector('[data-slot="sidebar-footer"]');
-      if (button2?.isConnected && (button2.dataset.fallback !== "true" || !footer)) return;
-      if (button2?.isConnected && footer) button2.remove();
-      button2 = document.createElement("button");
-      button2.type = "button";
-      button2.dataset.t3mods = "sidebar-button";
-      button2.title = "Mods for T3 Code";
-      const native = footer?.querySelector('[data-slot="sidebar-menu-button"]');
-      button2.className = native?.className ?? "";
-      button2.setAttribute("data-slot", "sidebar-menu-button");
-      button2.setAttribute("aria-label", "Mods for T3 Code");
-      button2.style.cssText = native ? "" : "display:flex;align-items:center;gap:8px;background:transparent;border:0;color:inherit;cursor:pointer;padding:8px;border-radius:6px;font:inherit;font-size:12px;min-height:32px";
-      button2.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M8 3h4v4a2 2 0 1 0 4 0V3h5v7h-4a2 2 0 1 0 0 4h4v7h-7v-4a2 2 0 1 0-4 0v4H3v-7h4a2 2 0 1 0 0-4H3V3h5Z"/></svg><span>Mods</span>';
-      button2.onclick = open2;
-      if (!footer) {
-        button2.dataset.fallback = "true";
-        button2.style.cssText += ";position:fixed;bottom:12px;left:12px;background:var(--background,#202027);z-index:999;border:1px solid var(--border,#444)";
-        document.body.append(button2);
+      const footer = sidebarFooter();
+      const native = footer ? footerReference(footer) : null;
+      if (native) {
+        mirror(native);
+        if (button2.parentElement !== item) item.append(button2);
+        place(native.closest("li") ?? native);
         return;
       }
-      const menu = footer.querySelector('[data-sidebar="menu"]') ?? footer.querySelector('[data-slot="sidebar-menu"]');
-      if (menu) {
-        const item = document.createElement("li");
-        item.setAttribute("data-slot", "sidebar-menu-item");
-        item.style.cssText = "list-style:none;display:flex;align-items:center";
-        item.append(button2);
-        menu.append(item);
-      } else footer.append(button2);
+      reference = void 0;
+      if (footer && UTILITY_PAGE.test(location.pathname)) {
+        hideTip();
+        item.remove();
+        button2.remove();
+        return;
+      }
+      item.remove();
+      button2.className = "";
+      button2.style.cssText = "display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border:0;border-radius:var(--control-radius,calc(var(--radius,.625rem) - 2px));background:transparent;color:var(--sidebar-muted-foreground,var(--muted-foreground,#a1a1aa));cursor:pointer";
+      if (footer) {
+        if (button2.parentElement !== footer) footer.append(button2);
+        return;
+      }
+      button2.style.cssText += ";position:fixed;left:12px;bottom:12px;z-index:999;background:var(--background,#0a0a0a);border:1px solid var(--border,#ffffff1a)";
+      if (button2.parentElement !== document.body) document.body.append(button2);
     }
     const observer = new MutationObserver(() => {
-      if ((!button2?.isConnected || button2.dataset.fallback === "true") && !frame) frame = requestAnimationFrame(attach);
+      if (!frame) frame = requestAnimationFrame(attach);
     });
     observer.observe(document.body, { subtree: true, childList: true });
     attach();
     return () => {
       observer.disconnect();
       cancelAnimationFrame(frame);
-      const parent = button2?.parentElement;
-      button2?.remove();
-      if (parent?.tagName === "LI") parent.remove();
+      hideTip();
+      button2.remove();
+      item.remove();
     };
   }
 
@@ -455,14 +519,52 @@ Write valid JSON with properly escaped code. Do not use markdown inside the file
 
   // payload/web/style.js
   var style = `
-:host{font-family:var(--font-sans,inherit);font-size:14px;color:var(--foreground,#e9e9ee);color-scheme:inherit;--mf-bg:var(--background,#202027);--mf-muted:var(--muted-foreground,#aaaab5);--mf-border:var(--border,#3a3a46);--mf-accent:var(--primary,#6574cd)}
-*{box-sizing:border-box}button,input,textarea{font:inherit}button{cursor:pointer}button:disabled{opacity:.5;cursor:wait}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--mf-accent);outline-offset:3px}
-button{background:transparent;color:inherit;border:1px solid var(--mf-border);border-radius:6px;padding:7px 11px}button:hover{background:color-mix(in srgb,var(--mf-accent) 12%,transparent)}button.primary{background:var(--mf-accent);color:var(--primary-foreground,#fff);border-color:var(--mf-accent);font-weight:600}button.danger{color:var(--destructive,#cc5151)}button.link{border:0;padding:4px;color:var(--mf-muted)}
-dialog{width:min(780px,calc(100vw - 40px));max-height:calc(100vh - 60px);margin:auto;padding:0;border:1px solid var(--mf-border);border-radius:calc(var(--radius,.625rem) + 2px);background:var(--mf-bg);color:inherit;box-shadow:0 20px 70px #0006}dialog::backdrop{background:#0008}
-header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:22px 26px;border-bottom:1px solid var(--mf-border)}header h1{font-size:19px;letter-spacing:-.4px;margin:0}header p{color:var(--mf-muted);font-size:12px;margin:5px 0 0}.header-actions{display:flex;gap:8px}.tabs{display:flex;gap:6px;padding:14px 26px 0}.tabs button{border:0;color:var(--mf-muted);padding:8px 12px}.tabs button[aria-selected=true]{background:color-mix(in srgb,var(--mf-accent) 16%,transparent);color:inherit}
-.content{padding:22px 26px;min-height:270px;max-height:65vh;overflow:auto}.toolbar{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:22px}.toolbar p{margin:0;color:var(--mf-muted);font-size:12px}.row{display:flex;gap:18px;justify-content:space-between;padding:18px 0;border-top:1px solid var(--mf-border)}.row:first-child{border-top:0}.row h2{font-size:15px;margin:0 0 7px}.row p{font-size:13px;color:var(--mf-muted);line-height:1.5;max-width:440px;margin:0 0 7px}.meta{font-size:11px;color:var(--mf-muted)}.row-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.state{font-size:11px;border-radius:4px;padding:3px 6px;color:var(--mf-muted);background:#8881}.error{color:var(--destructive,#cc5151);font-size:12px;white-space:pre-wrap}.empty{padding:26px 0;max-width:470px}.empty h2{font-size:24px;letter-spacing:-.6px;margin:0 0 12px}.empty p,.explain{line-height:1.6;color:var(--mf-muted);font-size:13px}.empty .actions{display:flex;gap:10px;margin-top:22px}
-.switch{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mf-muted)}input[type=checkbox]{accent-color:var(--mf-accent);width:16px;height:16px}textarea,input[type=text],input[type=search]{width:100%;background:transparent;color:inherit;border:1px solid var(--mf-border);border-radius:6px;padding:10px;margin:8px 0 14px}textarea{min-height:120px;resize:vertical}label{font-size:13px}.permission{padding:9px 0;border-top:1px solid var(--mf-border);font-size:13px}.permission code{font-size:11px;color:var(--mf-muted)}.review-code{font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:190px;overflow:auto;border:1px solid var(--mf-border);padding:12px}.actions{display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-top:20px}.log{font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}.panel-tray{position:fixed;right:18px;bottom:18px;width:310px;max-height:60vh;overflow:auto;background:var(--mf-bg);border:1px solid var(--mf-border);border-radius:9px;box-shadow:0 8px 32px #0004;z-index:999}.panel-tray header{padding:10px 14px;font-size:12px}.panel{padding:14px;border-top:1px solid var(--mf-border)}.panel h2{font-size:14px;margin:0 0 8px}.panel p{white-space:pre-wrap;font-size:13px;line-height:1.5;color:var(--mf-muted);margin:0}.panel .actions{justify-content:flex-start;flex-wrap:wrap;margin-top:10px}.notice{position:fixed;right:20px;top:20px;background:var(--mf-bg);border:1px solid var(--mf-border);border-radius:7px;padding:14px;width:min(350px,90vw);z-index:1000;font-size:13px;box-shadow:0 8px 30px #0004}.notice strong{display:block;margin-bottom:5px;font-size:12px;color:var(--mf-muted)}.fallback{position:fixed;left:12px;bottom:12px;background:var(--mf-bg);z-index:999}.badge{color:var(--mf-accent)}
-dialog[data-inline]{position:relative;inset:auto;width:100%;max-height:none;border:0;box-shadow:none;margin:0;border-radius:0;background:transparent}dialog[data-inline] .content{max-height:none}.decision-preview{white-space:pre-wrap;overflow-wrap:anywhere}.panel-tray[data-docked]{position:relative;inset:auto;width:100%;max-height:30vh;box-shadow:none;z-index:auto;margin-bottom:8px}@media(max-width:600px){header{padding:18px}.header-actions{gap:4px}.header-actions button{font-size:12px;padding:6px}.content{padding:18px}.tabs{padding-left:12px}.row{flex-direction:column;gap:10px}.row-actions{justify-content:flex-start}.panel-tray{width:280px}.toolbar{flex-wrap:wrap}.toolbar p{width:100%}}
+:host{--mf-fg:var(--foreground,#f5f5f5);--mf-muted:var(--muted-foreground,#a1a1aa);--mf-border:var(--border,#ffffff14);--mf-input:var(--input,var(--mf-border));--mf-bg:var(--background,#0a0a0a);--mf-card:var(--card,var(--mf-bg));--mf-popover:var(--popover,var(--mf-bg));--mf-accent:var(--accent,color-mix(in srgb,var(--mf-fg) 6%,transparent));--mf-primary:var(--primary,#3b82f6);--mf-primary-fg:var(--primary-foreground,#fff);--mf-ring:var(--ring,var(--mf-muted));--mf-danger:var(--destructive,#ef4444);--mf-radius:var(--radius,.625rem);--mf-control-radius:var(--control-radius,calc(var(--mf-radius) - 2px));font:13px/1.5 var(--font-sans,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif);color:var(--mf-fg);color-scheme:inherit;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}h1,h2,h3,p{margin:0}button,input,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid color-mix(in srgb,var(--mf-ring) 60%,transparent);outline-offset:1px}
+button{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 9px;border:1px solid var(--mf-input);border-radius:var(--mf-control-radius);background:color-mix(in srgb,var(--mf-input) 32%,transparent);font-size:13px;font-weight:500;white-space:nowrap;cursor:pointer;transition:background-color .15s,color .15s,border-color .15s}
+button:hover{background:color-mix(in srgb,var(--mf-accent) 60%,transparent)}button:disabled{opacity:.64;cursor:default;pointer-events:none}
+button.primary{background:var(--mf-primary);border-color:var(--mf-primary);color:var(--mf-primary-fg)}button.primary:hover{background:color-mix(in srgb,var(--mf-primary) 90%,transparent)}
+button.ghost,button.danger{background:transparent;border-color:transparent;color:var(--mf-muted)}button.ghost:hover,button.danger:hover{background:var(--mf-accent);color:var(--mf-fg)}button.danger:hover{color:var(--mf-danger)}
+button.destructive{background:var(--mf-danger);border-color:var(--mf-danger);color:#fff}
+button.xs{height:24px;padding:0 7px;font-size:12px;gap:4px}button.icon{width:28px;padding:0}button svg{width:16px;height:16px;flex:none}
+input.switch{appearance:none;-webkit-appearance:none;position:relative;flex:none;width:32px;height:20px;margin:0;padding:0;border:1px solid color-mix(in srgb,var(--mf-fg) 14%,transparent);border-radius:999px;background:color-mix(in srgb,var(--mf-fg) 20%,transparent);cursor:pointer;transition:background-color .2s,border-color .2s}
+input.switch::after{content:"";position:absolute;top:1px;left:1px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0003;transition:transform .2s}
+input.switch:checked{background:var(--mf-primary);border-color:var(--mf-primary)}input.switch:checked::after{transform:translateX(12px)}input.switch:disabled{opacity:.64;cursor:default}
+input[type=search],input[type=text],textarea{display:block;width:100%;min-height:32px;padding:5px 10px;border:1px solid var(--mf-input);border-radius:var(--mf-control-radius);background:color-mix(in srgb,var(--mf-input) 32%,transparent);font-size:13px;outline:none}
+input[type=search]:focus-visible,textarea:focus-visible{border-color:var(--mf-ring);outline:2px solid color-mix(in srgb,var(--mf-ring) 24%,transparent);outline-offset:0}
+textarea{min-height:96px;max-height:240px;resize:vertical;line-height:1.5}::placeholder{color:color-mix(in srgb,var(--mf-muted) 72%,transparent)}
+dialog{padding:0;margin:auto;border:1px solid var(--mf-border);border-radius:calc(var(--mf-radius) + 6px);background:var(--mf-popover);color:inherit;box-shadow:0 16px 48px #0000002e;width:min(640px,calc(100vw - 32px));height:min(600px,calc(100vh - 64px));overflow:hidden}
+dialog[open]{display:flex;flex-direction:column}dialog::backdrop{background:#00000052}
+dialog.ask{width:min(420px,calc(100vw - 32px));height:auto;max-height:calc(100vh - 64px)}dialog.ask .content{padding-top:4px}dialog.ask .explain{max-height:40vh;overflow:auto}
+header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:20px 20px 12px;flex:none}header h1{font-size:15px;font-weight:600;line-height:20px;letter-spacing:-.01em}header p{margin-top:2px;font-size:12px;color:var(--mf-muted)}.header-actions{display:flex;align-items:center;gap:4px;margin:-2px -6px 0 0}
+.tabs{display:flex;align-items:center;gap:2px;flex:none;margin:0 20px 4px;padding:2px;width:max-content;max-width:calc(100% - 40px);overflow-x:auto;border-radius:calc(var(--mf-control-radius) + 2px);background:color-mix(in srgb,var(--mf-fg) 5%,transparent)}
+.tabs button{height:24px;padding:0 10px;border:0;background:transparent;color:var(--mf-muted);font-size:12px}.tabs button:hover{color:var(--mf-fg);background:transparent}.tabs button[aria-selected=true]{background:color-mix(in srgb,var(--mf-fg) 10%,transparent);color:var(--mf-fg)}
+.content{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:16px 20px 20px;display:flex;flex-direction:column;gap:20px;scrollbar-gutter:stable}
+.section{display:flex;flex-direction:column;gap:8px}.section-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:20px;padding:0 4px}
+.section-head h2{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:color-mix(in srgb,var(--mf-fg) 50%,transparent)}.section-head h2::before{content:"";width:12px;height:1px;background:var(--mf-border)}
+.card{border:1px solid var(--mf-border);border-radius:calc(var(--mf-radius) + 6px);background:var(--mf-card);overflow:hidden}.card>.body{padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 16px;border-top:1px solid var(--mf-border)}.row:first-child{border-top:0}
+.row-text{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}.row h2{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;letter-spacing:-.01em;line-height:20px}.row p{font-size:12px;line-height:1.5;color:color-mix(in srgb,var(--mf-muted) 85%,transparent)}
+.row-actions{display:flex;align-items:center;gap:4px;flex:none}.row-actions input.switch{margin-left:8px}
+.meta{font-size:11px;color:var(--mf-muted);font-variant-numeric:tabular-nums}.state{font-size:11px;font-weight:500;line-height:16px;padding:0 6px;border-radius:999px;color:var(--mf-muted);background:color-mix(in srgb,var(--mf-fg) 7%,transparent)}.state[data-state=active]{color:var(--mf-fg)}
+.explain{font-size:12px;line-height:1.5;color:var(--mf-muted)}.content>.explain{padding:0 4px}.permission span{font-size:13px}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.error{font-size:12px;color:var(--mf-danger);white-space:pre-wrap}label{font-size:12px;font-weight:500}
+.permission code,.review code{font:11px/1.4 var(--font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);color:var(--mf-muted)}
+.review-title{display:flex;flex-direction:column;gap:2px}.review-title h2{font-size:15px;font-weight:600;line-height:20px}
+details{font-size:12px}summary{cursor:pointer;color:var(--mf-muted);padding:2px 4px}summary:hover{color:var(--mf-fg)}
+.review-code,.log{margin:8px 0 0;padding:10px 12px;max-height:220px;overflow:auto;border:1px solid var(--mf-border);border-radius:var(--mf-control-radius);background:color-mix(in srgb,var(--mf-fg) 3%,transparent);font:11px/1.6 var(--font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);white-space:pre-wrap;overflow-wrap:anywhere}
+.card>.log{margin:0;border:0;border-radius:0;max-height:none;min-height:120px;background:transparent}
+.actions{display:flex;align-items:center;justify-content:flex-end;gap:8px}.footer{flex:none;padding:12px 20px;border-top:1px solid var(--mf-border);background:color-mix(in srgb,var(--mf-fg) 2%,transparent)}
+.decision-preview{white-space:pre-wrap;overflow-wrap:anywhere}
+:host([data-inline]){display:flex;flex-direction:column;flex:1;min-height:0}
+dialog[data-inline]{position:static;flex:1;min-height:0;width:100%;height:auto;max-width:none;max-height:none;margin:0;border:0;border-radius:0;box-shadow:none;background:transparent}
+dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.footer{padding-inline:max(24px,calc((100% - 48rem) / 2))}dialog[data-inline]>.tabs{margin-inline:max(24px,calc((100% - 48rem) / 2))}dialog[data-inline]>header{padding-top:24px}dialog[data-inline]>.content{padding-bottom:32px}dialog[data-inline]>.footer{background:transparent}
+.notice{position:fixed;right:16px;bottom:16px;z-index:1000;width:min(340px,calc(100vw - 32px));display:flex;flex-direction:column;gap:2px;padding:10px 12px;border:1px solid var(--mf-border);border-radius:var(--mf-radius);background:var(--mf-popover);box-shadow:0 8px 24px #00000024;font-size:13px}.notice strong{font-size:12px;font-weight:600}.notice span{color:var(--mf-muted);font-size:12px}
+.panel-tray{position:fixed;right:16px;bottom:16px;z-index:999;width:300px;max-height:60vh;overflow:auto;border:1px solid var(--mf-border);border-radius:var(--mf-radius);background:var(--mf-popover);box-shadow:0 8px 24px #00000024}
+.panel-tray header{align-items:center;padding:6px 6px 6px 10px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:color-mix(in srgb,var(--mf-fg) 50%,transparent)}
+.panel{padding:10px;border-top:1px solid var(--mf-border)}.panel h2{font-size:13px;font-weight:600;margin:1px 0 4px}.panel p{font-size:12px;line-height:1.5;color:var(--mf-muted);white-space:pre-wrap}.panel .actions{justify-content:flex-start;flex-wrap:wrap;gap:4px;margin-top:8px}
+.panel-tray[data-docked]{position:relative;inset:auto;width:100%;max-height:30vh;box-shadow:none;z-index:auto;margin-bottom:8px;background:var(--mf-card)}
+@media(max-width:600px){header{padding:16px 16px 10px}.tabs{margin-inline:16px;max-width:calc(100% - 32px)}.content{padding:12px 16px 16px}.row{flex-direction:column;align-items:stretch;gap:8px}.row-actions{justify-content:flex-start;flex-wrap:wrap}.panel-tray{width:280px}}
 .band-stack{width:calc(100% - 2 * var(--chat-composer-drawer-inset,1.375rem));margin:0 auto -1rem;padding:5px 14px calc(1rem + 5px);border:1px solid var(--chat-composer-attached-outline,var(--mf-border));border-bottom:0;border-radius:1rem 1rem 0 0;background:var(--chat-composer-attached-surface,var(--card,var(--mf-bg)));font-size:12px;line-height:1.6}.band{white-space:pre;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}.band [data-tone=muted]{color:var(--mf-muted)}.band [data-tone=yellow]{color:var(--color-yellow-500,#d4a72c)}.band [data-tone=cyan]{color:var(--color-cyan-500,#22a8bd)}.band [data-tone=blue]{color:var(--info,var(--color-blue-500,#3b82f6))}.band [data-tone=magenta]{color:var(--color-fuchsia-500,#c85bd8)}.band [data-tone=red]{color:var(--destructive,#e5534b)}
 `;
 
@@ -537,6 +639,18 @@ dialog[data-inline]{position:relative;inset:auto;width:100%;max-height:none;bord
     return element;
   }
   var button = (text, onclick, className = "") => node("button", { text, onclick, class: className, type: "button" });
+  var toggle = (checked, label, disabled = false) => node("input", { type: "checkbox", role: "switch", class: "switch", checked, disabled, "aria-label": label });
+  function closeButton(onclick) {
+    const control = node("button", { type: "button", class: "ghost icon", onclick }, [node("span", { class: "sr-only", text: "Close" })]);
+    control.insertAdjacentHTML("afterbegin", '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>');
+    return control;
+  }
+  var section = (title, children, aside) => node("section", { class: "section" }, [node("div", { class: "section-head" }, [node("h2", { text: title }), ...aside ? [aside] : []]), node("div", { class: "card" }, children)]);
+  function row(title, description, controls = [], extra = []) {
+    const heading = typeof title === "string" ? node("h2", { text: title }) : node("h2", {}, title);
+    return node("article", { class: "row" }, [node("div", { class: "row-text" }, [heading, ...description ? [node("p", { text: description })] : [], ...extra]), node("div", { class: "row-actions" }, controls)]);
+  }
+  var note = (text) => node("div", { class: "row" }, [node("p", { class: "explain", text })]);
   async function mount(options) {
     if (window.__modsForT3Code) return;
     const root = node("div", { id: "mods-for-t3-code-host" });
@@ -582,7 +696,7 @@ dialog[data-inline]{position:relative;inset:auto;width:100%;max-height:none;bord
     let unsubscribeTelemetry;
     function ask(title, description, action, destructive = false) {
       const result = decisionQueue.then(() => new Promise((resolve) => {
-        const prompt = node("dialog", { "aria-label": title }, [node("header", {}, [node("h1", { text: title })]), node("div", { class: "content" }, [node("p", { class: "explain decision-preview", text: description }), node("div", { class: "actions" }, [button("Cancel", () => finish(false)), button(action, () => finish(true), destructive ? "danger" : "primary")])])]);
+        const prompt = node("dialog", { class: "ask", "aria-label": title }, [node("header", {}, [node("h1", { text: title })]), node("div", { class: "content" }, [node("p", { class: "explain decision-preview", text: description })]), node("div", { class: "footer actions" }, [button("Cancel", () => finish(false)), button(action, () => finish(true), destructive ? "destructive" : "primary")])]);
         function finish(value) {
           prompt.close();
           prompt.remove();
@@ -612,8 +726,17 @@ dialog[data-inline]{position:relative;inset:auto;width:100%;max-height:none;bord
       dialog.removeAttribute("data-inline");
       dialog.close();
       document.body.append(root);
-      settingsItem?.querySelector("button")?.removeAttribute("aria-current");
-      settingsItem?.querySelector("button")?.removeAttribute("data-active");
+      styleSettingsControl(false);
+    }
+    function closeManager() {
+      if (inlineContent) leaveInline();
+      else dialog.close();
+    }
+    function go(key) {
+      tab = key;
+      candidate = void 0;
+      detailsOnly = false;
+      render();
     }
     function notify(name, text) {
       const notice = node("div", { class: "notice", role: "status" }, [node("strong", { text: name }), node("span", { text })]);
@@ -636,12 +759,12 @@ dialog[data-inline]{position:relative;inset:auto;width:100%;max-height:none;bord
       tray.replaceChildren(node("header", {}, [node("span", { text: "Mod panels" }), button(trayOpen ? "Collapse" : "Expand", () => {
         trayOpen = !trayOpen;
         renderTray();
-      }, "link")]));
+      }, "ghost xs")]));
       if (!trayOpen) return;
       for (const [id, panel] of panels) {
         const runtime = runtimes.get(id);
         if (!runtime) continue;
-        tray.append(node("section", { class: "panel" }, [node("div", { class: "meta", text: runtime.record.manifest.name }), node("h2", { text: panel.title }), node("p", { text: panel.body }), node("div", { class: "actions" }, panel.actions.map((action) => button(action.label, () => runtime.invoke("action", action.id))))]));
+        tray.append(node("section", { class: "panel" }, [node("div", { class: "meta", text: runtime.record.manifest.name }), node("h2", { text: panel.title }), node("p", { text: panel.body }), node("div", { class: "actions" }, panel.actions.map((action) => button(action.label, () => runtime.invoke("action", action.id), "xs")))]));
       }
     }
     function renderBands() {
@@ -783,8 +906,7 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
       detailsOnly = false;
       render();
       dialog.open = true;
-      settingsItem?.querySelector("button")?.setAttribute("aria-current", "page");
-      settingsItem?.querySelector("button")?.setAttribute("data-active", "true");
+      styleSettingsControl(true);
     }
     async function run(action) {
       if (busy) return;
@@ -859,30 +981,54 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
       setTimeout(() => URL.revokeObjectURL(url), 1e3);
     }
     function render() {
-      dialog.replaceChildren(node("header", {}, [node("div", {}, [node("h1", { text: inlineContent ? "Mods" : "Mods for T3 Code" }), node("p", { text: "Your app, with a few personal touches." })]), node("div", { class: "header-actions" }, [button("Import mod", pickFile), button("Create a mod", () => {
-        tab = "create";
-        candidate = void 0;
-        render();
-      }, "primary"), button("Close", () => {
-        if (inlineContent) leaveInline();
-        else dialog.close();
-      }, "link")])]));
+      const actions = [button("Import\u2026", pickFile, "xs")];
+      if (!inlineContent) actions.push(closeButton(closeManager));
+      dialog.replaceChildren(node("header", {}, [node("div", {}, [node("h1", { text: "Mods" }), node("p", { text: "Local add-ons for T3 Code. Each mod runs isolated and can be switched off at any time." })]), node("div", { class: "header-actions" }, actions)]));
       if (candidate) {
         renderReview();
         return;
       }
       dialog.append(node("nav", { class: "tabs", "aria-label": "Mod manager" }, [["installed", "Installed"], ["examples", "Built-in"], ["commands", "Commands"], ["create", "Create"], ["console", "Activity"]].map(([key, text]) => {
-        const item = button(text, () => {
-          tab = key;
-          render();
-        });
+        const item = button(text, () => go(key));
         item.setAttribute("aria-selected", String(tab === key));
         return item;
       })));
       const content = node("div", { class: "content" });
       dialog.append(content);
       if (tab === "installed") {
-        const pause = node("input", { type: "checkbox", checked: paused, disabled: options.safeMode || busy });
+        const list = records.map((record) => {
+          const { manifest } = record;
+          const enabled = toggle(record.enabled, `Enable ${manifest.name}`, options.safeMode || busy);
+          enabled.onchange = () => void run(async () => {
+            stop(manifest.id);
+            record.enabled = enabled.checked;
+            record.quarantined = null;
+            await database.save(record);
+            start(record);
+            broadcast();
+          });
+          const state = paused ? "Paused" : runtimes.has(manifest.id) ? "Active" : "Off";
+          const count = manifest.permissions.length;
+          return row([document.createTextNode(manifest.name), node("span", { class: "state", "data-state": state.toLowerCase(), text: state })], manifest.description, [
+            button("Details", () => {
+              candidate = validateBundle(record);
+              detailsOnly = true;
+              render();
+            }, "ghost xs"),
+            button("Export", () => download(record), "ghost xs"),
+            button("Remove", () => void run(async () => {
+              if (!await ask(`Remove ${manifest.name}?`, "The mod and its private data will be removed. Export it first if you want a copy.", "Remove mod", true)) return;
+              stop(manifest.id);
+              await database.remove(manifest.id);
+              records = records.filter((item) => item !== record);
+              broadcast();
+            }), "danger xs"),
+            enabled
+          ], [node("div", { class: "meta", text: `${manifest.version} \xB7 ${manifest.author} \xB7 ${count} permission${count === 1 ? "" : "s"}` }), ...record.quarantined ? [node("p", { class: "error", text: `Stopped: ${record.quarantined}. Switch it on to retry.` })] : []]);
+        });
+        if (!list.length) list.push(row("No mods installed", "Import a .t3mod file, or describe a mod and let your AI build it.", [button("Import\u2026", pickFile, "xs"), button("Create", () => go("create"), "xs")]));
+        content.append(section("Installed", list, node("span", { class: "meta", text: options.safeMode ? "Safe mode" : `${records.length} installed \xB7 ${runtimes.size} active` })));
+        const pause = toggle(paused, "Pause all mods", options.safeMode || busy);
         pause.onchange = () => void run(async () => {
           paused = pause.checked;
           if (paused) for (const id of [...runtimes.keys()]) stop(id);
@@ -890,100 +1036,92 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
           broadcast();
           await reload();
         });
-        content.append(node("div", { class: "toolbar" }, [node("p", { text: options.safeMode ? "Safe mode: all mod code is off." : `${records.length} installed \xB7 ${runtimes.size} active` }), node("label", { class: "switch" }, [pause, document.createTextNode("Pause all mods")])]));
-        const dev = node("input", { type: "checkbox", checked: development, "aria-label": "Development mode" });
+        const dev = toggle(development, "Development mode");
         dev.onchange = () => void run(async () => {
           development = dev.checked;
           await database.setSetting("development", development);
         });
-        content.append(node("label", { class: "switch" }, [dev, document.createTextNode("Development mode: hot reload enabled inbox mods with existing permissions")]), node("p", { class: "explain", text: "New permissions always need review. Pause all mods is the immediate recovery switch." }));
-        if (!records.length) content.append(node("div", { class: "empty" }, [node("h2", { text: "Make T3 feel like yours." }), node("p", { text: "Add a focus timer, save your favorite prompts, or ask your AI to build something new. Mods can be installed and switched off while T3 stays open." }), node("div", { class: "actions" }, [button("Import a .t3mod file", pickFile), button("Create with my AI", () => open2("create"), "primary")])]));
-        for (const record of records) {
-          const { manifest } = record;
-          const toggle = node("input", { type: "checkbox", checked: record.enabled, disabled: options.safeMode || busy, "aria-label": `Enable ${manifest.name}` });
-          toggle.onchange = () => void run(async () => {
-            stop(manifest.id);
-            record.enabled = toggle.checked;
-            record.quarantined = null;
-            await database.save(record);
-            start(record);
-            broadcast();
-          });
-          content.append(node("article", { class: "row" }, [node("div", {}, [node("h2", { text: manifest.name }), node("p", { text: manifest.description }), node("div", { class: "meta", text: `${manifest.version} \xB7 ${manifest.author} \xB7 ${manifest.permissions.length} permissions` }), ...record.quarantined ? [node("p", { class: "error", text: `Stopped: ${record.quarantined}. Enable to retry.` })] : []]), node("div", { class: "row-actions" }, [node("span", { class: "state", text: paused ? "Paused" : runtimes.has(manifest.id) ? "Active" : "Off" }), toggle, button("Details", () => {
-            candidate = validateBundle(record);
-            detailsOnly = true;
-            render();
-          }), button("Export", () => download(record)), button("Remove", () => void run(async () => {
-            if (!await ask(`Remove ${manifest.name}?`, "The mod and its private data will be removed. Export it first if you want a copy.", "Remove mod", true)) return;
-            stop(manifest.id);
-            await database.remove(manifest.id);
-            records = records.filter((item) => item !== record);
-            broadcast();
-          }), "danger")])]));
-        }
+        content.append(section("General", [
+          row("Pause all mods", options.safeMode ? "Safe mode is on, so all mod code is off." : "Stops every mod immediately. Use this if something misbehaves.", [pause]),
+          row("Development mode", "Hot reload inbox updates to enabled mods from the same author. New permissions always need review.", [dev])
+        ]));
       } else if (tab === "examples") {
-        content.append(node("p", { class: "explain", text: "Included with the app patch. Review and install a mod, then switch it on. Themes change T3\u2019s own color tokens and restore your appearance when disabled." }));
-        for (const bundle of options.examples ?? []) content.append(node("article", { class: "row" }, [node("div", {}, [node("h2", { text: bundle.manifest.name }), node("p", { text: bundle.manifest.description })]), button("Review mod", () => {
+        const list = (options.examples ?? []).map((bundle) => row(bundle.manifest.name, bundle.manifest.description, [button("Review", () => {
           detailsOnly = false;
           candidate = validateBundle(bundle);
           render();
-        })]));
+        }, "xs")]));
+        content.append(section("Built-in", list.length ? list : [note("No built-in mods in this build.")]), node("p", { class: "explain", text: "Included with Mods for T3 Code. Installed mods stay off until you switch them on. Themes use T3\u2019s own color tokens and restore your appearance when turned off." }));
       } else if (tab === "commands") {
         let show = function() {
           list.replaceChildren();
           for (const [id, entries] of commands) for (const command of entries.values()) {
             const runtime = runtimes.get(id);
             if (!runtime || !command.title.toLowerCase().includes(search.value.toLowerCase())) continue;
-            list.append(node("div", { class: "row" }, [node("div", {}, [node("h2", { text: command.title }), node("span", { class: "meta", text: runtime.record.manifest.name })]), button("Run", () => {
-              dialog.close();
+            list.append(row(command.title, runtime.record.manifest.name, [button("Run", () => {
+              closeManager();
               runtime.invoke("command", command.id);
-            })]));
+            }, "xs")]));
           }
-          if (!list.childNodes.length) list.append(node("p", { class: "explain", text: "Enable a mod that registers commands to see them here." }));
+          if (!list.childNodes.length) list.append(note(commands.size ? "No matching commands." : "Switch on a mod that registers commands to see them here."));
         };
-        const search = node("input", { type: "search", placeholder: "Find a local mod command\u2026", "aria-label": "Find command" });
+        const search = node("input", { type: "search", placeholder: "Find a mod command\u2026", "aria-label": "Find command" });
         const list = node("div");
-        content.append(search, list);
+        content.append(search, section("Commands", [list]));
         search.oninput = show;
         show();
       } else if (tab === "create") {
         const description = node("textarea", { placeholder: "A focus timer with a start button and a reminder after 25 minutes\u2026", "aria-label": "Describe your mod", maxLength: 5e3 });
-        content.append(node("h2", { text: "Build a mod with your AI" }), node("p", { class: "explain", text: "Describe what you want. We\u2019ll put a request with the mod API in your T3 composer. Choose your usual model and send it using the account you already have." }), node("label", { text: "What should your mod do?" }), description, node("p", { class: "explain", text: "When your AI saves the file, review its permissions here before enabling it. Open a chat thread first. Your existing draft will be kept." }), node("div", { class: "actions" }, [button("Copy request", () => void run(async () => {
+        const request = () => {
           if (!description.value.trim()) throw new Error("Describe your mod first.");
-          await navigator.clipboard.writeText(authorPrompt(description.value, options.inbox));
-          notify("Create a mod", "Request copied. Paste it into your T3 chat.");
-        })), button("Draft in T3", () => void run(async () => {
-          if (!description.value.trim()) throw new Error("Describe your mod first.");
-          const text = authorPrompt(description.value, options.inbox);
-          dialog.close();
-          insertDraft((readDraft() ? "\n\n" : "") + text);
-        }), "primary")]));
+          return authorPrompt(description.value, options.inbox);
+        };
+        content.append(section("Create with your AI", [node("div", { class: "body" }, [
+          node("label", { text: "What should your mod do?" }),
+          description,
+          node("p", { class: "explain", text: "Draft in T3 adds a request with the mod API to your composer; send it with your usual model. Your existing draft is kept. When your AI saves the mod, it appears here for permission review." }),
+          node("div", { class: "actions" }, [
+            button("Copy request", () => void run(async () => {
+              await navigator.clipboard.writeText(request());
+              notify("Create a mod", "Request copied. Paste it into a T3 chat.");
+            }), "xs"),
+            button("Draft in T3", () => void run(async () => {
+              const text = request();
+              if (!composer()) throw new Error("Open a T3 thread with a composer, then try again.");
+              closeManager();
+              insertDraft((readDraft() ? "\n\n" : "") + text);
+            }), "primary xs")
+          ])
+        ])]));
       } else {
-        content.append(node("p", { class: "explain", text: "Recent mod messages and failures. This log stays in this window." }), button("Clear activity", () => {
+        content.append(section("Activity", [node("pre", { class: "log", text: logs.join("\n") || "No mod activity yet." })], button("Clear", () => {
           logs.length = 0;
           render();
-        }), node("pre", { class: "log", text: logs.join("\n") || "No mod activity yet." }));
+        }, "ghost xs")), node("p", { class: "explain", text: "Recent mod messages and failures in this window." }));
       }
     }
     function renderReview() {
       const { manifest } = candidate;
       const previous = records.find((record) => record.manifest.id === manifest.id);
-      const content = node("div", { class: "content" }, [node("h2", { text: detailsOnly ? manifest.name : previous ? `Review update: ${manifest.name}` : `Review ${manifest.name}` }), node("p", { class: "explain", text: manifest.description }), node("div", { class: "meta", text: `${manifest.version} \xB7 ${manifest.author}` }), node("p", { class: "explain", text: "This mod asks to:" })]);
-      for (const permission of manifest.permissions) content.append(node("div", { class: "permission" }, [node("div", { text: PERMISSIONS[permission] }), node("code", { text: `${permission}${previous && !previous.manifest.permissions.includes(permission) ? " \u2014 new permission" : ""}` })]));
-      if (!manifest.permissions.length) content.append(node("p", { class: "explain", text: "No optional permissions." }));
+      const content = node("div", { class: "content" }, [node("div", { class: "review-title" }, [node("h2", { text: detailsOnly ? manifest.name : previous ? `Review update: ${manifest.name}` : `Review ${manifest.name}` }), node("p", { class: "explain", text: manifest.description }), node("div", { class: "meta", text: `${manifest.version} \xB7 ${manifest.author}` })])]);
+      const permissions = manifest.permissions.map((permission) => node("div", { class: "row permission" }, [node("div", { class: "row-text" }, [node("span", { text: PERMISSIONS[permission] }), node("code", { text: `${permission}${previous && !previous.manifest.permissions.includes(permission) ? " \u2014 new permission" : ""}` })])]));
+      content.append(section(detailsOnly ? "Permissions" : "This mod asks to", permissions.length ? permissions : [note("No optional permissions.")]));
+      const footer = node("div", { class: "footer actions" });
       if (detailsOnly) {
-        content.append(node("details", {}, [node("summary", { text: "JavaScript source" }), node("pre", { class: "review-code", text: candidate.code })]), button("Close details", () => {
+        content.append(node("details", {}, [node("summary", { text: "JavaScript source" }), node("pre", { class: "review-code", text: candidate.code })]));
+        footer.append(button("Done", () => {
           candidate = void 0;
           detailsOnly = false;
           render();
-        }));
-        dialog.append(content);
+        }, "xs"));
+        dialog.append(content, footer);
         return;
       }
-      content.append(node("p", { class: "explain", text: "Install code from authors you trust. Mod code is isolated from T3\u2019s files and credentials, but a mod can consume browser resources and use every permission listed above." }), node("details", {}, [node("summary", { text: "Review JavaScript source" }), node("pre", { class: "review-code", text: candidate.code })]), node("div", { class: "actions" }, [button("Cancel", () => void run(async () => {
+      content.append(node("p", { class: "explain", text: "Install code from authors you trust. Mod code is isolated from T3\u2019s files and credentials, but a mod can consume browser resources and use every permission listed above." }), node("details", {}, [node("summary", { text: "Review JavaScript source" }), node("pre", { class: "review-code", text: candidate.code })]));
+      footer.append(button("Cancel", () => void run(async () => {
         await remember(candidate);
         candidate = candidates.shift();
-      })), button(previous ? "Update mod" : "Install mod", () => void run(async () => {
+      }), "xs"), button(previous ? "Update mod" : "Install mod", () => void run(async () => {
         const bundle = candidate;
         stop(manifest.id);
         const record = { ...bundle, enabled: false, quarantined: null };
@@ -994,8 +1132,8 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
         candidate = candidates.shift();
         broadcast();
         notify(manifest.name, "Installed. Switch it on when you\u2019re ready.");
-      }), "primary")]));
-      dialog.append(content);
+      }), "primary xs"));
+      dialog.append(content, footer);
     }
     function onInput(event) {
       if (!event.target?.closest?.('[data-testid="composer-editor"]')) return;
@@ -1006,23 +1144,52 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
     }
     const detachSidebar = attachSidebarButton(() => open2());
     let settingsItem;
+    function settingsNav() {
+      const content = document.querySelector('[data-sidebar="content"]') ?? document.querySelector('[data-slot="sidebar-content"]');
+      const menus = content ? [...content.querySelectorAll('[data-sidebar="menu"], [data-slot="sidebar-menu"], ul')] : [];
+      return menus.find((menu) => navItems(menu).some((item) => /\b(general|appearance|providers|keybindings)\b/i.test(item.textContent))) ?? null;
+    }
+    function navItems(menu) {
+      return [...menu.querySelectorAll("button, a")].filter((item) => !item.closest("[data-t3mods]") && item.textContent.trim());
+    }
+    function styleSettingsControl(active) {
+      const control = settingsItem?.querySelector("button");
+      if (!control) return;
+      const items = settingsItem.parentElement ? navItems(settingsItem.parentElement) : [];
+      const isActive = (item) => item.getAttribute("data-active") === "true" || item.getAttribute("aria-current") === "page";
+      const reference = (active ? items.find(isActive) : items.find((item) => !isActive(item))) ?? items[0];
+      control.className = reference?.className ?? "";
+      control.style.cssText = reference ? "" : "display:flex;align-items:center;gap:8px;width:100%;padding:6px 10px;border:0;border-radius:6px;background:none;color:inherit;font:inherit;font-size:13px;text-align:left;cursor:pointer";
+      for (const name of ["data-slot", "data-sidebar", "data-size"]) {
+        const value = reference?.getAttribute(name);
+        if (value) control.setAttribute(name, value);
+      }
+      control.querySelector("svg")?.setAttribute("class", reference?.querySelector("svg")?.getAttribute("class") ?? "");
+      control.querySelector("span")?.setAttribute("class", reference?.querySelector("span")?.getAttribute("class") ?? "");
+      if (reference?.hasAttribute("data-active")) control.setAttribute("data-active", String(active));
+      if (active) control.setAttribute("aria-current", "page");
+      else control.removeAttribute("aria-current");
+    }
     function attachSettings() {
       if (!location.pathname.startsWith("/settings") || settingsItem?.isConnected) return;
-      const sidebar = document.querySelector('[data-sidebar="content"] [data-sidebar="menu"]');
-      if (!sidebar) return;
-      const item = node("li", { "data-t3mods": "settings-section", "data-slot": "sidebar-menu-item", style: "list-style:none" });
-      const control = button("Mods", openSettings);
-      const sibling = sidebar.querySelector('[data-slot="sidebar-menu-button"]');
-      control.className = sibling?.className ?? "";
-      control.setAttribute("data-slot", "sidebar-menu-button");
-      control.style.cssText = sibling ? "" : "width:100%;text-align:left;padding:8px 10px;background:none;border:0;color:inherit;font:inherit;font-size:13px;cursor:pointer;border-radius:6px";
-      control.setAttribute("aria-label", "Mods settings");
+      const menu = settingsNav();
+      if (!menu) return;
+      const nativeItem = navItems(menu)[0]?.closest("li");
+      const item = node("li", { "data-t3mods": "settings-section", class: nativeItem?.className ?? "" });
+      for (const name of ["data-slot", "data-sidebar"]) {
+        const value = nativeItem?.getAttribute(name);
+        if (value) item.setAttribute(name, value);
+      }
+      if (!nativeItem) item.style.cssText = "list-style:none";
+      const control = node("button", { type: "button", onclick: openSettings }, [node("span", { text: "Mods" })]);
+      control.insertAdjacentHTML("afterbegin", MODS_ICON);
       item.append(control);
-      sidebar.append(item);
+      menu.append(item);
       settingsItem = item;
+      styleSettingsControl(Boolean(inlineContent));
     }
     function attachPanels() {
-      const footer = document.querySelector('[data-sidebar="footer"]') ?? document.querySelector('[data-slot="sidebar-footer"]');
+      const footer = sidebarFooter();
       if (!footer) return;
       if (panelRoot.parentElement !== footer) footer.prepend(panelRoot);
       if (tray.parentNode !== panelShadow) {

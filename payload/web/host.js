@@ -1,7 +1,7 @@
 import { validateBundle, usageSnapshot, PERMISSIONS, MAX_BUNDLE_BYTES } from "./manifest.js";
 import { database } from "./database.js";
 import { ModRuntime } from "./runtime.js";
-import { attachSidebarButton, dockAboveComposer, insertDraft, readDraft } from "./adapter.js";
+import { MODS_ICON, attachSidebarButton, composer, dockAboveComposer, insertDraft, readDraft, sidebarFooter } from "./adapter.js";
 import { authorPrompt } from "./author.js";
 import { style } from "./style.js";
 import { ThemeHost } from "./themes.js";
@@ -18,6 +18,19 @@ function node(tag, attributes = {}, children = []) {
   element.append(...children); return element;
 }
 const button = (text, onclick, className = "") => node("button", { text, onclick, class: className, type: "button" });
+const toggle = (checked, label, disabled = false) => node("input", { type: "checkbox", role: "switch", class: "switch", checked, disabled, "aria-label": label });
+function closeButton(onclick) {
+  const control = node("button", { type: "button", class: "ghost icon", onclick }, [node("span", { class: "sr-only", text: "Close" })]);
+  control.insertAdjacentHTML("afterbegin", '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>');
+  return control;
+}
+// Settings-style building blocks: an uppercase section label over a bordered card of rows.
+const section = (title, children, aside) => node("section", { class: "section" }, [node("div", { class: "section-head" }, [node("h2", { text: title }), ...(aside ? [aside] : [])]), node("div", { class: "card" }, children)]);
+function row(title, description, controls = [], extra = []) {
+  const heading = typeof title === "string" ? node("h2", { text: title }) : node("h2", {}, title);
+  return node("article", { class: "row" }, [node("div", { class: "row-text" }, [heading, ...(description ? [node("p", { text: description })] : []), ...extra]), node("div", { class: "row-actions" }, controls)]);
+}
+const note = (text) => node("div", { class: "row" }, [node("p", { class: "explain", text })]);
 
 export async function mount(options) {
   if (window.__modsForT3Code) return;
@@ -65,7 +78,7 @@ export async function mount(options) {
 
   function ask(title, description, action, destructive = false) {
     const result = decisionQueue.then(() => new Promise((resolve) => {
-      const prompt = node("dialog", { "aria-label": title }, [node("header", {}, [node("h1", { text: title })]), node("div", { class: "content" }, [node("p", { class: "explain decision-preview", text: description }), node("div", { class: "actions" }, [button("Cancel", () => finish(false)), button(action, () => finish(true), destructive ? "danger" : "primary")])])]);
+      const prompt = node("dialog", { class: "ask", "aria-label": title }, [node("header", {}, [node("h1", { text: title })]), node("div", { class: "content" }, [node("p", { class: "explain decision-preview", text: description })]), node("div", { class: "footer actions" }, [button("Cancel", () => finish(false)), button(action, () => finish(true), destructive ? "destructive" : "primary")])]);
       function finish(value) { prompt.close(); prompt.remove(); resolve(value); }
       prompt.addEventListener("cancel", (event) => { event.preventDefault(); finish(false); });
       shadow.append(prompt); prompt.showModal();
@@ -83,9 +96,10 @@ export async function mount(options) {
     inlineContent.style.display = inlineDisplay;
     inlineContent = undefined; root.removeAttribute("data-inline");
     dialog.removeAttribute("data-inline"); dialog.close(); document.body.append(root);
-    settingsItem?.querySelector("button")?.removeAttribute("aria-current");
-    settingsItem?.querySelector("button")?.removeAttribute("data-active");
+    styleSettingsControl(false);
   }
+  function closeManager() { if (inlineContent) leaveInline(); else dialog.close(); }
+  function go(key) { tab = key; candidate = undefined; detailsOnly = false; render(); }
 
   function notify(name, text) {
     const notice = node("div", { class: "notice", role: "status" }, [node("strong", { text: name }), node("span", { text })]);
@@ -100,12 +114,12 @@ export async function mount(options) {
   }
   function renderTray() {
     tray.hidden = panels.size === 0;
-    tray.replaceChildren(node("header", {}, [node("span", { text: "Mod panels" }), button(trayOpen ? "Collapse" : "Expand", () => { trayOpen = !trayOpen; renderTray(); }, "link")]));
+    tray.replaceChildren(node("header", {}, [node("span", { text: "Mod panels" }), button(trayOpen ? "Collapse" : "Expand", () => { trayOpen = !trayOpen; renderTray(); }, "ghost xs")]));
     if (!trayOpen) return;
     for (const [id, panel] of panels) {
       const runtime = runtimes.get(id);
       if (!runtime) continue;
-      tray.append(node("section", { class: "panel" }, [node("div", { class: "meta", text: runtime.record.manifest.name }), node("h2", { text: panel.title }), node("p", { text: panel.body }), node("div", { class: "actions" }, panel.actions.map((action) => button(action.label, () => runtime.invoke("action", action.id))))]));
+      tray.append(node("section", { class: "panel" }, [node("div", { class: "meta", text: runtime.record.manifest.name }), node("h2", { text: panel.title }), node("p", { text: panel.body }), node("div", { class: "actions" }, panel.actions.map((action) => button(action.label, () => runtime.invoke("action", action.id), "xs")))]));
     }
   }
   function renderBands() {
@@ -185,8 +199,7 @@ export async function mount(options) {
     inlineContent = content; inlineDisplay = content.style.display; content.style.display = "none";
     root.setAttribute("data-inline", "true"); dialog.setAttribute("data-inline", "true");
     content.parentElement.append(root); tab = "installed"; candidate = undefined; detailsOnly = false; render(); dialog.open = true;
-    settingsItem?.querySelector("button")?.setAttribute("aria-current", "page");
-    settingsItem?.querySelector("button")?.setAttribute("data-active", "true");
+    styleSettingsControl(true);
   }
   async function run(action) {
     if (busy) return;
@@ -235,63 +248,86 @@ export async function mount(options) {
     document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   function render() {
-    dialog.replaceChildren(node("header", {}, [node("div", {}, [node("h1", { text: inlineContent ? "Mods" : "Mods for T3 Code" }), node("p", { text: "Your app, with a few personal touches." })]), node("div", { class: "header-actions" }, [button("Import mod", pickFile), button("Create a mod", () => { tab = "create"; candidate = undefined; render(); }, "primary"), button("Close", () => { if (inlineContent) leaveInline(); else dialog.close(); }, "link")])]));
+    const actions = [button("Import…", pickFile, "xs")];
+    if (!inlineContent) actions.push(closeButton(closeManager));
+    dialog.replaceChildren(node("header", {}, [node("div", {}, [node("h1", { text: "Mods" }), node("p", { text: "Local add-ons for T3 Code. Each mod runs isolated and can be switched off at any time." })]), node("div", { class: "header-actions" }, actions)]));
     if (candidate) { renderReview(); return; }
     dialog.append(node("nav", { class: "tabs", "aria-label": "Mod manager" }, [["installed", "Installed"], ["examples", "Built-in"], ["commands", "Commands"], ["create", "Create"], ["console", "Activity"]].map(([key, text]) => {
-      const item = button(text, () => { tab = key; render(); }); item.setAttribute("aria-selected", String(tab === key)); return item;
+      const item = button(text, () => go(key)); item.setAttribute("aria-selected", String(tab === key)); return item;
     })));
     const content = node("div", { class: "content" }); dialog.append(content);
     if (tab === "installed") {
-      const pause = node("input", { type: "checkbox", checked: paused, disabled: options.safeMode || busy });
-      pause.onchange = () => void run(async () => { paused = pause.checked; if (paused) for (const id of [...runtimes.keys()]) stop(id); await database.setSetting("paused", paused); broadcast(); await reload(); });
-      content.append(node("div", { class: "toolbar" }, [node("p", { text: options.safeMode ? "Safe mode: all mod code is off." : `${records.length} installed · ${runtimes.size} active` }), node("label", { class: "switch" }, [pause, document.createTextNode("Pause all mods")])]));
-      const dev = node("input", { type: "checkbox", checked: development, "aria-label": "Development mode" });
-      dev.onchange = () => void run(async () => { development = dev.checked; await database.setSetting("development", development); });
-      content.append(node("label", { class: "switch" }, [dev, document.createTextNode("Development mode: hot reload enabled inbox mods with existing permissions")]), node("p", { class: "explain", text: "New permissions always need review. Pause all mods is the immediate recovery switch." }));
-      if (!records.length) content.append(node("div", { class: "empty" }, [node("h2", { text: "Make T3 feel like yours." }), node("p", { text: "Add a focus timer, save your favorite prompts, or ask your AI to build something new. Mods can be installed and switched off while T3 stays open." }), node("div", { class: "actions" }, [button("Import a .t3mod file", pickFile), button("Create with my AI", () => open("create"), "primary")])]));
-      for (const record of records) {
+      const list = records.map((record) => {
         const { manifest } = record;
-        const toggle = node("input", { type: "checkbox", checked: record.enabled, disabled: options.safeMode || busy, "aria-label": `Enable ${manifest.name}` });
-        toggle.onchange = () => void run(async () => { stop(manifest.id); record.enabled = toggle.checked; record.quarantined = null; await database.save(record); start(record); broadcast(); });
-        content.append(node("article", { class: "row" }, [node("div", {}, [node("h2", { text: manifest.name }), node("p", { text: manifest.description }), node("div", { class: "meta", text: `${manifest.version} · ${manifest.author} · ${manifest.permissions.length} permissions` }), ...(record.quarantined ? [node("p", { class: "error", text: `Stopped: ${record.quarantined}. Enable to retry.` })] : [])]), node("div", { class: "row-actions" }, [node("span", { class: "state", text: paused ? "Paused" : runtimes.has(manifest.id) ? "Active" : "Off" }), toggle, button("Details", () => { candidate = validateBundle(record); detailsOnly = true; render(); }), button("Export", () => download(record)), button("Remove", () => void run(async () => { if (!await ask(`Remove ${manifest.name}?`, "The mod and its private data will be removed. Export it first if you want a copy.", "Remove mod", true)) return; stop(manifest.id); await database.remove(manifest.id); records = records.filter((item) => item !== record); broadcast(); }), "danger")])]));
-      }
+        const enabled = toggle(record.enabled, `Enable ${manifest.name}`, options.safeMode || busy);
+        enabled.onchange = () => void run(async () => { stop(manifest.id); record.enabled = enabled.checked; record.quarantined = null; await database.save(record); start(record); broadcast(); });
+        const state = paused ? "Paused" : runtimes.has(manifest.id) ? "Active" : "Off";
+        const count = manifest.permissions.length;
+        return row([document.createTextNode(manifest.name), node("span", { class: "state", "data-state": state.toLowerCase(), text: state })], manifest.description, [
+          button("Details", () => { candidate = validateBundle(record); detailsOnly = true; render(); }, "ghost xs"),
+          button("Export", () => download(record), "ghost xs"),
+          button("Remove", () => void run(async () => { if (!await ask(`Remove ${manifest.name}?`, "The mod and its private data will be removed. Export it first if you want a copy.", "Remove mod", true)) return; stop(manifest.id); await database.remove(manifest.id); records = records.filter((item) => item !== record); broadcast(); }), "danger xs"),
+          enabled,
+        ], [node("div", { class: "meta", text: `${manifest.version} · ${manifest.author} · ${count} permission${count === 1 ? "" : "s"}` }), ...(record.quarantined ? [node("p", { class: "error", text: `Stopped: ${record.quarantined}. Switch it on to retry.` })] : [])]);
+      });
+      if (!list.length) list.push(row("No mods installed", "Import a .t3mod file, or describe a mod and let your AI build it.", [button("Import…", pickFile, "xs"), button("Create", () => go("create"), "xs")]));
+      content.append(section("Installed", list, node("span", { class: "meta", text: options.safeMode ? "Safe mode" : `${records.length} installed · ${runtimes.size} active` })));
+      const pause = toggle(paused, "Pause all mods", options.safeMode || busy);
+      pause.onchange = () => void run(async () => { paused = pause.checked; if (paused) for (const id of [...runtimes.keys()]) stop(id); await database.setSetting("paused", paused); broadcast(); await reload(); });
+      const dev = toggle(development, "Development mode");
+      dev.onchange = () => void run(async () => { development = dev.checked; await database.setSetting("development", development); });
+      content.append(section("General", [
+        row("Pause all mods", options.safeMode ? "Safe mode is on, so all mod code is off." : "Stops every mod immediately. Use this if something misbehaves.", [pause]),
+        row("Development mode", "Hot reload inbox updates to enabled mods from the same author. New permissions always need review.", [dev]),
+      ]));
     } else if (tab === "examples") {
-      content.append(node("p", { class: "explain", text: "Included with the app patch. Review and install a mod, then switch it on. Themes change T3’s own color tokens and restore your appearance when disabled." }));
-      for (const bundle of options.examples ?? []) content.append(node("article", { class: "row" }, [node("div", {}, [node("h2", { text: bundle.manifest.name }), node("p", { text: bundle.manifest.description })]), button("Review mod", () => { detailsOnly = false; candidate = validateBundle(bundle); render(); })]));
+      const list = (options.examples ?? []).map((bundle) => row(bundle.manifest.name, bundle.manifest.description, [button("Review", () => { detailsOnly = false; candidate = validateBundle(bundle); render(); }, "xs")]));
+      content.append(section("Built-in", list.length ? list : [note("No built-in mods in this build.")]), node("p", { class: "explain", text: "Included with Mods for T3 Code. Installed mods stay off until you switch them on. Themes use T3’s own color tokens and restore your appearance when turned off." }));
     } else if (tab === "commands") {
-      const search = node("input", { type: "search", placeholder: "Find a local mod command…", "aria-label": "Find command" });
-      const list = node("div"); content.append(search, list);
+      const search = node("input", { type: "search", placeholder: "Find a mod command…", "aria-label": "Find command" });
+      const list = node("div"); content.append(search, section("Commands", [list]));
       function show() {
         list.replaceChildren();
         for (const [id, entries] of commands) for (const command of entries.values()) {
           const runtime = runtimes.get(id); if (!runtime || !command.title.toLowerCase().includes(search.value.toLowerCase())) continue;
-          list.append(node("div", { class: "row" }, [node("div", {}, [node("h2", { text: command.title }), node("span", { class: "meta", text: runtime.record.manifest.name })]), button("Run", () => { dialog.close(); runtime.invoke("command", command.id); })]));
+          list.append(row(command.title, runtime.record.manifest.name, [button("Run", () => { closeManager(); runtime.invoke("command", command.id); }, "xs")]));
         }
-        if (!list.childNodes.length) list.append(node("p", { class: "explain", text: "Enable a mod that registers commands to see them here." }));
+        if (!list.childNodes.length) list.append(note(commands.size ? "No matching commands." : "Switch on a mod that registers commands to see them here."));
       }
       search.oninput = show; show();
     } else if (tab === "create") {
       const description = node("textarea", { placeholder: "A focus timer with a start button and a reminder after 25 minutes…", "aria-label": "Describe your mod", maxLength: 5000 });
-      content.append(node("h2", { text: "Build a mod with your AI" }), node("p", { class: "explain", text: "Describe what you want. We’ll put a request with the mod API in your T3 composer. Choose your usual model and send it using the account you already have." }), node("label", { text: "What should your mod do?" }), description, node("p", { class: "explain", text: "When your AI saves the file, review its permissions here before enabling it. Open a chat thread first. Your existing draft will be kept." }), node("div", { class: "actions" }, [button("Copy request", () => void run(async () => { if (!description.value.trim()) throw new Error("Describe your mod first."); await navigator.clipboard.writeText(authorPrompt(description.value, options.inbox)); notify("Create a mod", "Request copied. Paste it into your T3 chat."); })), button("Draft in T3", () => void run(async () => { if (!description.value.trim()) throw new Error("Describe your mod first."); const text = authorPrompt(description.value, options.inbox); dialog.close(); insertDraft((readDraft() ? "\n\n" : "") + text); }), "primary")]));
+      const request = () => { if (!description.value.trim()) throw new Error("Describe your mod first."); return authorPrompt(description.value, options.inbox); };
+      content.append(section("Create with your AI", [node("div", { class: "body" }, [
+        node("label", { text: "What should your mod do?" }), description,
+        node("p", { class: "explain", text: "Draft in T3 adds a request with the mod API to your composer; send it with your usual model. Your existing draft is kept. When your AI saves the mod, it appears here for permission review." }),
+        node("div", { class: "actions" }, [
+          button("Copy request", () => void run(async () => { await navigator.clipboard.writeText(request()); notify("Create a mod", "Request copied. Paste it into a T3 chat."); }), "xs"),
+          button("Draft in T3", () => void run(async () => { const text = request(); if (!composer()) throw new Error("Open a T3 thread with a composer, then try again."); closeManager(); insertDraft((readDraft() ? "\n\n" : "") + text); }), "primary xs"),
+        ]),
+      ])]));
     } else {
-      content.append(node("p", { class: "explain", text: "Recent mod messages and failures. This log stays in this window." }), button("Clear activity", () => { logs.length = 0; render(); }), node("pre", { class: "log", text: logs.join("\n") || "No mod activity yet." }));
+      content.append(section("Activity", [node("pre", { class: "log", text: logs.join("\n") || "No mod activity yet." })], button("Clear", () => { logs.length = 0; render(); }, "ghost xs")), node("p", { class: "explain", text: "Recent mod messages and failures in this window." }));
     }
   }
   function renderReview() {
     const { manifest } = candidate;
     const previous = records.find((record) => record.manifest.id === manifest.id);
-    const content = node("div", { class: "content" }, [node("h2", { text: detailsOnly ? manifest.name : previous ? `Review update: ${manifest.name}` : `Review ${manifest.name}` }), node("p", { class: "explain", text: manifest.description }), node("div", { class: "meta", text: `${manifest.version} · ${manifest.author}` }), node("p", { class: "explain", text: "This mod asks to:" })]);
-    for (const permission of manifest.permissions) content.append(node("div", { class: "permission" }, [node("div", { text: PERMISSIONS[permission] }), node("code", { text: `${permission}${previous && !previous.manifest.permissions.includes(permission) ? " — new permission" : ""}` })]));
-    if (!manifest.permissions.length) content.append(node("p", { class: "explain", text: "No optional permissions." }));
+    const content = node("div", { class: "content" }, [node("div", { class: "review-title" }, [node("h2", { text: detailsOnly ? manifest.name : previous ? `Review update: ${manifest.name}` : `Review ${manifest.name}` }), node("p", { class: "explain", text: manifest.description }), node("div", { class: "meta", text: `${manifest.version} · ${manifest.author}` })])]);
+    const permissions = manifest.permissions.map((permission) => node("div", { class: "row permission" }, [node("div", { class: "row-text" }, [node("span", { text: PERMISSIONS[permission] }), node("code", { text: `${permission}${previous && !previous.manifest.permissions.includes(permission) ? " — new permission" : ""}` })])]));
+    content.append(section(detailsOnly ? "Permissions" : "This mod asks to", permissions.length ? permissions : [note("No optional permissions.")]));
+    const footer = node("div", { class: "footer actions" });
     if (detailsOnly) {
-      content.append(node("details", {}, [node("summary", { text: "JavaScript source" }), node("pre", { class: "review-code", text: candidate.code })]), button("Close details", () => { candidate = undefined; detailsOnly = false; render(); })); dialog.append(content); return;
+      content.append(node("details", {}, [node("summary", { text: "JavaScript source" }), node("pre", { class: "review-code", text: candidate.code })]));
+      footer.append(button("Done", () => { candidate = undefined; detailsOnly = false; render(); }, "xs")); dialog.append(content, footer); return;
     }
-    content.append(node("p", { class: "explain", text: "Install code from authors you trust. Mod code is isolated from T3’s files and credentials, but a mod can consume browser resources and use every permission listed above." }), node("details", {}, [node("summary", { text: "Review JavaScript source" }), node("pre", { class: "review-code", text: candidate.code })]), node("div", { class: "actions" }, [button("Cancel", () => void run(async () => { await remember(candidate); candidate = candidates.shift(); })), button(previous ? "Update mod" : "Install mod", () => void run(async () => {
+    content.append(node("p", { class: "explain", text: "Install code from authors you trust. Mod code is isolated from T3’s files and credentials, but a mod can consume browser resources and use every permission listed above." }), node("details", {}, [node("summary", { text: "Review JavaScript source" }), node("pre", { class: "review-code", text: candidate.code })]));
+    footer.append(button("Cancel", () => void run(async () => { await remember(candidate); candidate = candidates.shift(); }), "xs"), button(previous ? "Update mod" : "Install mod", () => void run(async () => {
       const bundle = candidate; stop(manifest.id);
       const record = { ...bundle, enabled: false, quarantined: null }; delete record.inboxHash;
       await database.save(record); await remember(bundle); records = await database.list(); candidate = candidates.shift(); broadcast();
       notify(manifest.name, "Installed. Switch it on when you’re ready.");
-    }), "primary")])); dialog.append(content);
+    }), "primary xs")); dialog.append(content, footer);
   }
   function onInput(event) {
     if (!event.target?.closest?.('[data-testid="composer-editor"]')) return;
@@ -299,20 +335,42 @@ export async function mount(options) {
   }
   const detachSidebar = attachSidebarButton(() => open());
   let settingsItem;
+  // T3's Settings sidebar: the menu that lists its sections, not the thread list.
+  function settingsNav() {
+    const content = document.querySelector('[data-sidebar="content"]') ?? document.querySelector('[data-slot="sidebar-content"]');
+    const menus = content ? [...content.querySelectorAll('[data-sidebar="menu"], [data-slot="sidebar-menu"], ul')] : [];
+    return menus.find((menu) => navItems(menu).some((item) => /\b(general|appearance|providers|keybindings)\b/i.test(item.textContent))) ?? null;
+  }
+  function navItems(menu) { return [...menu.querySelectorAll("button, a")].filter((item) => !item.closest("[data-t3mods]") && item.textContent.trim()); }
+  // Borrow an adjacent native item's classes so active/inactive states match T3.
+  function styleSettingsControl(active) {
+    const control = settingsItem?.querySelector("button");
+    if (!control) return;
+    const items = settingsItem.parentElement ? navItems(settingsItem.parentElement) : [];
+    const isActive = (item) => item.getAttribute("data-active") === "true" || item.getAttribute("aria-current") === "page";
+    const reference = (active ? items.find(isActive) : items.find((item) => !isActive(item))) ?? items[0];
+    control.className = reference?.className ?? "";
+    control.style.cssText = reference ? "" : "display:flex;align-items:center;gap:8px;width:100%;padding:6px 10px;border:0;border-radius:6px;background:none;color:inherit;font:inherit;font-size:13px;text-align:left;cursor:pointer";
+    for (const name of ["data-slot", "data-sidebar", "data-size"]) { const value = reference?.getAttribute(name); if (value) control.setAttribute(name, value); }
+    control.querySelector("svg")?.setAttribute("class", reference?.querySelector("svg")?.getAttribute("class") ?? "");
+    control.querySelector("span")?.setAttribute("class", reference?.querySelector("span")?.getAttribute("class") ?? "");
+    if (reference?.hasAttribute("data-active")) control.setAttribute("data-active", String(active));
+    if (active) control.setAttribute("aria-current", "page"); else control.removeAttribute("aria-current");
+  }
   function attachSettings() {
     if (!location.pathname.startsWith("/settings") || settingsItem?.isConnected) return;
-    const sidebar = document.querySelector('[data-sidebar="content"] [data-sidebar="menu"]');
-    if (!sidebar) return;
-    const item = node("li", { "data-t3mods": "settings-section", "data-slot": "sidebar-menu-item", style: "list-style:none" });
-    const control = button("Mods", openSettings);
-    const sibling = sidebar.querySelector('[data-slot="sidebar-menu-button"]');
-    control.className = sibling?.className ?? "";
-    control.setAttribute("data-slot", "sidebar-menu-button");
-    control.style.cssText = sibling ? "" : "width:100%;text-align:left;padding:8px 10px;background:none;border:0;color:inherit;font:inherit;font-size:13px;cursor:pointer;border-radius:6px";
-    control.setAttribute("aria-label", "Mods settings"); item.append(control); sidebar.append(item); settingsItem = item;
+    const menu = settingsNav();
+    if (!menu) return;
+    const nativeItem = navItems(menu)[0]?.closest("li");
+    const item = node("li", { "data-t3mods": "settings-section", class: nativeItem?.className ?? "" });
+    for (const name of ["data-slot", "data-sidebar"]) { const value = nativeItem?.getAttribute(name); if (value) item.setAttribute(name, value); }
+    if (!nativeItem) item.style.cssText = "list-style:none";
+    const control = node("button", { type: "button", onclick: openSettings }, [node("span", { text: "Mods" })]);
+    control.insertAdjacentHTML("afterbegin", MODS_ICON);
+    item.append(control); menu.append(item); settingsItem = item; styleSettingsControl(Boolean(inlineContent));
   }
   function attachPanels() {
-    const footer = document.querySelector('[data-sidebar="footer"]') ?? document.querySelector('[data-slot="sidebar-footer"]');
+    const footer = sidebarFooter();
     if (!footer) return;
     if (panelRoot.parentElement !== footer) footer.prepend(panelRoot);
     if (tray.parentNode !== panelShadow) { tray.setAttribute("data-docked", "true"); panelShadow.append(tray); }

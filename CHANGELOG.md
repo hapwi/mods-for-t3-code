@@ -7,8 +7,7 @@
 - Install the Patcher changelog policy for ongoing changes and explicitly authorized releases.
 - Add the MIT-licensed Mods for T3 Code host, sidebar and Settings entries, live mod management, commands, panels, permission review, and isolated worker runtimes.
 - Create mods through the current T3 composer and provider account, with a watched inbox for immediate import review.
-- Add Linux/macOS curl and Windows PowerShell installers, managed Electron copies, reversible archive patches, integrity checks, safe mode, and a typed SDK.
-- Create separate application shortcuts, including a macOS app launcher that opens without a Terminal window.
+- Add Linux/macOS curl and Windows PowerShell installers, reversible installed-app patches, integrity checks, safe mode, and a typed SDK.
 - Add live theme tokens, built-in theme/timer/prompt examples, permission-aware author hot reload, and persistent inbox review decisions.
 - Observe measured context usage and turn completion through a read-only preload supporting current and earlier T3 event formats.
 - Add Token Weather above the prompt with live weather thresholds, measured token counts, a 12-turn sparkline, and per-thread completed-turn deltas.
@@ -17,6 +16,16 @@
 - Include the license notices for dependencies bundled into the Windows resource helper.
 
 ### Fixed
+
+- Match the Mods footer icon to native utility buttons and replace the oversized manager with compact T3-style dialogs, settings rows, switches, typography, and theme tokens. Verify icon sizing/placement and inline Settings in a focused browser fixture.
+
+- Confirm macOS signing and the visible Mods sidebar entry in the existing installed Nightly app. Refresh the host on repeated installation without creating another app.
+- Detect an open macOS app, ask through the terminal before closing it normally, show patch-stage progress, and reopen the same app after installation. Reuse the previously selected app on reinstall.
+
+- Verify installed-path AppImage patching, repeat installation, checksum inspection, and exact-byte restoration against a temporary copy of the current T3 build; exercise Windows staging and rollback in focused fixtures.
+
+- Patch the existing T3 app at its normal path on macOS, Windows, and Linux AppImage installations, with complete backups and no separate app shortcut. Existing managed-copy installs migrate by rerunning the installer.
+- Remove vendor-only macOS entitlements from local signing so AMFI can start the patched app, retaining required Electron runtime entitlements.
 
 - Detect native T3 Code (Alpha), Nightly, and alternate app names in system and user Applications/Programs folders; report platform-specific search locations when detection fails.
 - Preserve clean upstream updates on reinstall/uninstall, retain only current and previous managed copies, and keep macOS updates tied to the original installation.

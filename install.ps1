@@ -39,7 +39,7 @@ try {
   if (!(Test-Path $tool)) { Move-Item (Join-Path $work "mods-for-t3-code-$revision") $tool }
   $cli = Join-Path $tool 'bin/cli.mjs'
   if ($T3Directory) { & $node $cli install --windows-dir $T3Directory } else { & $node $cli install }
-  if ($LASTEXITCODE -ne 0) { throw 'The patch was not installed. The original T3 app is unchanged.' }
+  if ($LASTEXITCODE -ne 0) { throw 'The patch was not installed. Any failed replacement is rolled back.' }
   $launcher = Join-Path $tools 'mods-for-t3-code.cmd'
   # Percent characters must be doubled inside a cmd script's literal paths.
   $safeNode = $node.Replace('%', '%%')
@@ -50,11 +50,14 @@ try {
     ('set "MODS_FOR_T3_DATA=' + $safeData + '"'),
     ('"' + $safeNode + '" "' + $safeCli + '" %*')
   ) -join "`r`n")
-  $shell = New-Object -ComObject WScript.Shell
-  $shortcut = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Mods for T3 Code.lnk'))
-  $shortcut.TargetPath = $launcher
-  $shortcut.Arguments = 'launch'
-  $shortcut.Save()
-  Write-Host "Installed. Close T3 once, then open the Mods for T3 Code desktop shortcut. Mod changes are live after that."
+  # Retire only our old shortcut, preserving the user's normal T3 shortcut.
+  $legacyShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Mods for T3 Code.lnk'
+  if (Test-Path $legacyShortcut) {
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($legacyShortcut)
+    if ($shortcut.TargetPath -eq $launcher -and $shortcut.Arguments -eq 'launch') { Remove-Item $legacyShortcut }
+  }
+  Write-Host "Installed into your existing T3 Code app. Reopen it using its normal icon."
+  Write-Host "Find Mods in the sidebar or Settings → Mods. Individual mod changes apply live."
   Write-Host "Tool command: $launcher"
 } finally { Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue }

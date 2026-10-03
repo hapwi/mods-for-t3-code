@@ -53,7 +53,7 @@ export async function command(binary, args, options = {}) {
   });
 }
 
-async function installRuntime() {
+export async function installRuntime() {
   const target = path.join(dataRoot, "runtime");
   await mkdir(target, { recursive: true, mode: 0o700 });
   for (const file of ["bootstrap.cjs", "telemetry-preload.cjs", "renderer.js", "paths.cjs", "examples.json"]) {
@@ -70,7 +70,7 @@ async function installRuntime() {
 
 export async function patchArchive(filename, { checkOnly = false, managedCopy = false } = {}) {
   const archive = path.resolve(filename);
-  if (!managedCopy && archive.includes(`${path.sep}Contents${path.sep}Resources${path.sep}`)) throw new Error("Use --mac-app for a managed, locally signed copy. Direct patching of the original signed macOS bundle is refused.");
+  if (!managedCopy && archive.includes(`${path.sep}Contents${path.sep}Resources${path.sep}`)) throw new Error("Use --mac-app so the installed macOS bundle is backed up and correctly signed.");
   const stateFile = `${archive}.mods-for-t3-code.json`;
   const backup = `${archive}.mods-for-t3-code.bak`;
   let adoptUpstream = false;

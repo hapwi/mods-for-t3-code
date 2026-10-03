@@ -53,20 +53,28 @@ if [ ! -d "$tool" ]; then mv "$source" "$tool"; fi
 "$node_bin" "$tool/bin/cli.mjs" install "$@"
 launcher="$tools_dir/mods-for-t3-code"
 "$node_bin" -e 'const fs=require("fs");const q=s=>"\x27"+s.replaceAll("\x27","\x27\\\x27\x27")+"\x27";fs.writeFileSync(process.argv[1],"#!/bin/sh\nexport MODS_FOR_T3_DATA="+q(process.argv[4])+"\nexec "+q(process.argv[2])+" "+q(process.argv[3])+" \"$@\"\n",{mode:0o755})' "$launcher" "$node_bin" "$tool/bin/cli.mjs" "$data_dir"
-if [ "$node_platform" = linux ]; then
-  desktop_dir="${XDG_DATA_HOME:-${HOME}/.local/share}/applications"
-  mkdir -p "$desktop_dir"
-  "$node_bin" -e 'const fs=require("fs");const q=s=>"\""+s.replace(/["`$\\]/g,"\\$&")+"\"";fs.writeFileSync(process.argv[1],"[Desktop Entry]\nType=Application\nName=Mods for T3 Code\nComment=T3 Code with live, isolated mods\nExec="+q(process.argv[2])+" launch\nIcon=applications-development\nTerminal=false\nCategories=Development;\n",{mode:0o644})' "$desktop_dir/mods-for-t3-code.desktop" "$launcher"
-else
-  app_launcher="$HOME/Applications/Mods for T3 Code.app"
-  mkdir -p "$app_launcher/Contents/MacOS"
-  "$node_bin" -e 'const fs=require("fs");const q=s=>"\x27"+s.replaceAll("\x27","\x27\\\x27\x27")+"\x27";fs.writeFileSync(process.argv[1],"#!/bin/sh\nexec "+q(process.argv[2])+" launch\n",{mode:0o755})' "$app_launcher/Contents/MacOS/launch" "$launcher"
-  cat > "$app_launcher/Contents/Info.plist" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>CFBundleExecutable</key><string>launch</string><key>CFBundleIdentifier</key><string>dev.hapwi.mods-for-t3-code.launcher</string><key>CFBundleName</key><string>Mods for T3 Code</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>1</string></dict></plist>
-PLIST
-fi
-printf '\nInstalled command: %s\n' "$launcher"
-printf 'Start the managed app: "%s" launch\n' "$launcher"
-printf '%s\n' 'Open Mods for T3 Code from your applications menu for automatic patch reapplication.'
+# Retire only the shortcut created by earlier versions of this installer.
+# The existing T3 icon continues to open the patched installed app.
+"$node_bin" --input-type=module - "$node_platform" "$launcher" <<'CLEANUP'
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+const [kind, launcher] = process.argv.slice(2);
+try {
+  if (kind === 'darwin') {
+    const app = path.join(os.homedir(), 'Applications', 'Mods for T3 Code.app');
+    const script = fs.readFileSync(path.join(app, 'Contents/MacOS/launch'), 'utf8');
+    const plist = fs.readFileSync(path.join(app, 'Contents/Info.plist'), 'utf8');
+    if (plist.includes('<string>dev.hapwi.mods-for-t3-code.launcher</string>') && script.includes(launcher)) fs.rmSync(app, { recursive: true });
+  } else {
+    const shortcut = path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local/share'), 'applications/mods-for-t3-code.desktop');
+    const content = fs.readFileSync(shortcut, 'utf8');
+    if (content.includes('Name=Mods for T3 Code\n') && content.includes(launcher)) fs.rmSync(shortcut);
+  }
+} catch (error) { if (error.code !== 'ENOENT') console.warn(`Old Mods shortcut was kept: ${error.message}`); }
+CLEANUP
+# Keep the user's ordinary T3 icon and launch path. This is a maintenance
+# command, not another application or desktop shortcut.
+printf '\nMaintenance command: %s\n' "$launcher"
+printf '%s\n' 'Use your existing T3 Code app and its normal icon.'
+printf '%s\n' 'Find the Mods icon in the sidebar or Settings → Mods. Mod changes apply live.'

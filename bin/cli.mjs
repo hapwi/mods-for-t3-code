@@ -3,19 +3,34 @@ import { readFile, writeFile, mkdir, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { platform } from "node:os";
 import { validateBundle, validateManifest } from "../payload/web/manifest.js";
-import { patchArchive, restoreArchive, installAppImage, detectInstallation, dataRoot, launchApp, uninstallAppImage, exists, command as runCommand } from "../src/install.mjs";
-import { installPlatform, launchPlatform, uninstallPlatform, detectPlatform } from "../src/platform.mjs";
+import { patchArchive, restoreArchive, detectInstallation, dataRoot, launchApp, uninstallAppImage, exists, command as runCommand } from "../src/install.mjs";
+import { launchPlatform, uninstallPlatform, detectPlatform } from "../src/platform.mjs";
+
+import { withMacAppClosed } from "../src/mac-session.mjs";
+import { installMacApp, launchMacApp, uninstallMacApp, doctorMacApp } from "../src/mac-install.mjs";
+import { installWindowsApp, launchWindowsApp, uninstallWindowsApp, doctorWindowsApp } from "../src/windows-install.mjs";
+import { installInstalledAppImage, launchInstalledAppImage, uninstallInstalledAppImage, doctorInstalledAppImage } from "../src/appimage-install.mjs";
 
 const [command = "help", ...args] = process.argv.slice(2);
 const archiveRecord = path.join(dataRoot, "archive.json");
 function option(name) { const index = args.indexOf(name); if (index < 0) return undefined; if (!args[index + 1] || args[index + 1].startsWith("--")) throw new Error(`${name} needs a value.`); return args[index + 1]; }
+async function nativeTarget(kind) {
+  const filename = path.join(dataRoot, kind === "darwin" ? "mac-install.json" : "windows-install.json");
+  for (const recordFile of [filename, path.join(dataRoot, "platform.json")]) {
+    if (!await exists(recordFile)) continue;
+    const record = JSON.parse(await readFile(recordFile, "utf8"));
+    const target = record.installedApp || record.original;
+    if (record.kind === kind && target && await exists(target)) return target;
+  }
+  return detectPlatform();
+}
 const help = `Mods for T3 Code
 
   install [--appimage FILE | --asar FILE | --mac-app APP | --windows-dir DIR]
                                           Detect and patch an Electron install
   doctor  [--asar FILE]                    Check compatibility / patch checksums
-  uninstall [--asar FILE]                  Restore archive or remove AppImage copy
-  launch [-- Electron flags]               Open managed copy; refresh after updates
+  uninstall [--asar FILE]                  Restore your installed T3 app
+  launch [-- Electron flags]               Open existing T3; refresh after updates
   safe-mode on|off                         Turn all mod code off for next launch
   pack MOD_DIRECTORY [--out FILE]          Bundle a JS/TS mod for sharing
   validate FILE.t3mod                      Validate a bundle without executing it
@@ -30,20 +45,26 @@ try {
   if (command === "help" || command === "--help" || command === "-h") console.log(help);
   else if (command === "install") {
     let result;
-    if (option("--mac-app") || platform() === "darwin") result = await installPlatform(option("--mac-app") || await detectPlatform(), "darwin");
-    else if (option("--windows-dir") || platform() === "win32" && !option("--asar")) result = await installPlatform(option("--windows-dir") || await detectPlatform(), "win32");
+    if (option("--mac-app") || platform() === "darwin") {
+      const app = option("--mac-app") || await nativeTarget("darwin");
+      console.log(`\nMods for T3 Code\nPatching your existing app: ${app}`);
+      result = await withMacAppClosed(app, onProgress => installMacApp(app, { onProgress }));
+    }
+    else if (option("--windows-dir") || platform() === "win32" && !option("--asar")) result = await installWindowsApp(option("--windows-dir") || await nativeTarget("win32"));
     else {
       const target = option("--asar") || option("--appimage") || await detectInstallation();
-      result = target.endsWith(".asar") ? await patchArchive(target) : await installAppImage(target);
+      result = target.endsWith(".asar") ? await patchArchive(target) : await installInstalledAppImage(target);
       if (target.endsWith(".asar")) {
         await mkdir(dataRoot, { recursive: true, mode: 0o700 });
         await writeFile(archiveRecord, JSON.stringify({ archive: path.resolve(target) }), { mode: 0o600 });
       }
     }
     console.log(`Mods for T3 Code installed for T3 ${result.appVersion}.`);
-    console.log("Open with: mods-for-t3-code launch");
+    console.log(`Patched your existing T3 app${result.installedApp ? `: ${result.installedApp}` : ""}. Reopen it using its normal icon.`);
     console.log("Use the Mods sidebar icon or Settings → Mods. Changes to mods apply live.");
   } else if (command === "doctor") {
+    const nativeDoctor = !option("--asar") && (await exists(path.join(dataRoot, "mac-install.json")) ? doctorMacApp : await exists(path.join(dataRoot, "windows-install.json")) ? doctorWindowsApp : await exists(path.join(dataRoot, "appimage-install.json")) ? doctorInstalledAppImage : null);
+    if (nativeDoctor) { console.log(JSON.stringify(await nativeDoctor(), null, 2)); process.exit(0); }
     let target = option("--asar");
     if (!target && await exists(path.join(dataRoot, "appimage.json"))) target = JSON.parse(await readFile(path.join(dataRoot, "appimage.json"), "utf8")).archive;
     if (!target && await exists(path.join(dataRoot, "platform.json"))) target = JSON.parse(await readFile(path.join(dataRoot, "platform.json"), "utf8")).archive;
@@ -55,14 +76,20 @@ try {
   } else if (command === "uninstall") {
     const archive = option("--asar");
     if (archive) await restoreArchive(archive);
+    else if (await exists(path.join(dataRoot, "mac-install.json"))) await uninstallMacApp();
+    else if (await exists(path.join(dataRoot, "windows-install.json"))) await uninstallWindowsApp();
+    else if (await exists(path.join(dataRoot, "appimage-install.json"))) await uninstallInstalledAppImage();
     else if (await exists(path.join(dataRoot, "platform.json"))) await uninstallPlatform();
     else if (await exists(path.join(dataRoot, "appimage.json"))) await uninstallAppImage();
     else if (await exists(archiveRecord)) { await restoreArchive(JSON.parse(await readFile(archiveRecord, "utf8")).archive); await rm(archiveRecord); }
-    else throw new Error("No managed installation found. For a direct archive use uninstall --asar FILE.");
-    console.log("Patch removed. The original T3 app and private mod data are preserved.");
+    else throw new Error("No installation record found. For a direct archive use uninstall --asar FILE.");
+    console.log("Patch removed. Your installed T3 app is restored and private mod data is preserved.");
   } else if (command === "launch") {
     const flags = args[0] === "--" ? args.slice(1) : args;
-    if (await exists(path.join(dataRoot, "platform.json"))) await launchPlatform(flags);
+    if (await exists(path.join(dataRoot, "mac-install.json"))) await launchMacApp(flags);
+    else if (await exists(path.join(dataRoot, "windows-install.json"))) await launchWindowsApp(flags);
+    else if (await exists(path.join(dataRoot, "appimage-install.json"))) await launchInstalledAppImage(flags);
+    else if (await exists(path.join(dataRoot, "platform.json"))) await launchPlatform(flags);
     else if (await exists(path.join(dataRoot, "appimage.json"))) await launchApp(flags);
     else if (await exists(archiveRecord)) {
       const archive = JSON.parse(await readFile(archiveRecord, "utf8")).archive;
