@@ -124,12 +124,23 @@ export async function uninstallPlatform() {
   await rm(recordPath);
 }
 
-export async function detectPlatform() {
-  if (platform() === "darwin") {
-    for (const candidate of ["/Applications/T3 Code.app", "/Applications/T3-Code.app", path.join(homedir(), "Applications", "T3 Code.app")]) if (await exists(candidate)) return candidate;
-  } else if (platform() === "win32") {
-    const local = process.env.LOCALAPPDATA || homedir();
-    for (const candidate of [path.join(local, "Programs", "T3 Code"), path.join(local, "Programs", "t3-code"), path.join(local, "Programs", "t3code"), path.join(process.env.ProgramFiles || "C:\\Program Files", "T3 Code")]) if (await exists(path.join(candidate, "resources", "app.asar"))) return candidate;
+export async function detectPlatform({ kind = platform(), home = homedir(), applications = "/Applications", localAppData = process.env.LOCALAPPDATA || home, programFiles = process.env.ProgramFiles || "C:\\Program Files" } = {}) {
+  const names = ["T3 Code", "T3-Code", "T3Code", "T3", "T3 Code (Alpha)", "T3 Code (Nightly)", "T3 Code Nightly"];
+  if (kind === "darwin") {
+    const directories = [applications, path.join(home, "Applications")];
+    for (const directory of directories) for (const name of names) {
+      const candidate = path.join(directory, `${name}.app`);
+      if (await exists(path.join(candidate, "Contents", "Resources", "app.asar"))) return candidate;
+    }
+    throw new Error(`T3 was not found in ${directories.join(" or ")}. Pass --mac-app '/path/to/your T3.app' (including the full app name).`);
   }
-  throw new Error("T3 was not found. Pass --mac-app /path/to/T3.app or --windows-dir C:\\path\\to\\T3.");
+  if (kind === "win32") {
+    const directories = [path.join(localAppData, "Programs"), programFiles];
+    for (const directory of directories) for (const name of [...names, "t3-code", "t3code"]) {
+      const candidate = path.join(directory, name);
+      if (await exists(path.join(candidate, "resources", "app.asar"))) return candidate;
+    }
+    throw new Error(`T3 was not found in ${directories.join(" or ")}. Pass --windows-dir 'C:\\path\\to\\your T3 installation'.`);
+  }
+  throw new Error(`Native installation detection is unsupported on ${kind}. On Linux use --appimage or --asar.`);
 }

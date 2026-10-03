@@ -18,6 +18,7 @@
 
 ### Fixed
 
+- Detect native T3 Code (Alpha), Nightly, and alternate app names in system and user Applications/Programs folders; report platform-specific search locations when detection fails.
 - Preserve clean upstream updates on reinstall/uninstall, retain only current and previous managed copies, and keep macOS updates tied to the original installation.
 - Remember direct Linux archive installs so the Mods launcher can reapply patches after updates and uninstall without requiring the archive path again.
 - Use T3's native sidebar and Settings surfaces, replace blocking browser confirmation dialogs, and remove a shortcut conflicting with T3's model picker.

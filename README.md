@@ -28,7 +28,7 @@ For an unusual location, download the installer and pass an explicit path:
 curl -fsSL https://raw.githubusercontent.com/hapwi/mods-for-t3-code/main/install.sh -o /tmp/t3-mods-install.sh
 sh /tmp/t3-mods-install.sh --appimage /path/to/T3-Code.AppImage
 # macOS:
-sh /tmp/t3-mods-install.sh --mac-app '/Applications/T3 Code.app'
+sh /tmp/t3-mods-install.sh --mac-app '/Applications/T3 Code (Alpha).app'
 # Writable Linux Electron installations:
 sh /tmp/t3-mods-install.sh --asar /opt/t3-code/resources/app.asar
 ```
