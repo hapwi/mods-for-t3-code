@@ -1,0 +1,49 @@
+{
+  "name": "mods-for-t3-code",
+  "version": "0.1.0",
+  "description": "Live, isolated mods inside the T3 Code Electron app, with a reversible installer.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "mods-for-t3-code": "bin/cli.mjs"
+  },
+  "exports": {
+    "./sdk": "./sdk.d.ts"
+  },
+  "files": [
+    "bin",
+    "src",
+    "payload",
+    "dist",
+    "sdk.d.ts",
+    "examples",
+    "install.sh",
+    "install.ps1",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "demo": "node scripts/demo.mjs",
+    "pack:examples": "node bin/cli.mjs pack examples/focus-timer --out demo/focus-timer.t3mod && node bin/cli.mjs pack examples/prompt-kit --out demo/prompt-kit.t3mod",
+    "build": "node scripts/build.mjs"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "dependencies": {
+    "esbuild": "0.28.2",
+    "resedit": "3.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hapwi/mods-for-t3-code.git"
+  },
+  "homepage": "https://github.com/hapwi/mods-for-t3-code",
+  "bugs": {
+    "url": "https://github.com/hapwi/mods-for-t3-code/issues"
+  },
+  "devDependencies": {
+    "@electron/asar": "4.3.1"
+  }
+}

@@ -1,0 +1,1 @@
+{"apiVersion":1,"id":"midnight-theme","version":"1.0.0","name":"Midnight blue","description":"A calm dark palette using T3’s native theme tokens. Turning it off restores your normal appearance.","author":"Mods for T3 Code","permissions":["ui.theme"],"entry":"mod.js"}

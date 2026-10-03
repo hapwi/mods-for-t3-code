@@ -1,0 +1,16 @@
+{
+  "format": "t3mod/1",
+  "manifest": {
+    "apiVersion": 1,
+    "id": "prompt-kit",
+    "version": "1.0.0",
+    "name": "Prompt kit",
+    "description": "Local commands that offer useful review and debugging prompts for your current T3 draft. Every insertion asks first.",
+    "author": "Mods for T3 Code",
+    "permissions": [
+      "ui.commands",
+      "draft.insert"
+    ]
+  },
+  "code": "var T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === \"object\" || typeof from === \"function\") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, \"__esModule\", { value: true }), mod);\n\n  // examples/prompt-kit/mod.js\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    await api.commands.register({ id: \"review\", title: \"Draft a focused code review\" }, () => api.draft.insert(\"Review the changes in this thread. Focus on correctness and the behavior requested. Explain any concrete issues and the smallest fix.\"));\n    await api.commands.register({ id: \"debug\", title: \"Draft a debugging request\" }, () => api.draft.insert(\"Investigate this failure. Find the smallest reproducible cause, explain it, and make a focused fix. Run only the checks needed to confirm the fix.\"));\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n"
+}
