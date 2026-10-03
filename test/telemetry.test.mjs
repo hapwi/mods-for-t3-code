@@ -5,6 +5,10 @@ import vm from "node:vm";
 
 const source = await readFile(new URL("../payload/telemetry-preload.cjs", import.meta.url), "utf8");
 function harness() {
+  class Store {
+    constructor(name = "thread", database = "t3code:connection-runtime") { this.name = name; this.transaction = { db: { name: database } }; }
+    get(key) { const request = new EventTarget(); request.key = key; return request; }
+  }
   class Socket extends EventTarget {
     static OPEN = 1;
     constructor(url) { super(); this.url = url; }
@@ -13,13 +17,13 @@ function harness() {
   }
   const location = { protocol: "t3code:", hostname: "app", pathname: "/local/thread-a", href: "t3code://app/local/thread-a" };
   let context;
-  const window = { WebSocket: Socket }; window.top = window;
+  const window = { WebSocket: Socket, IDBObjectStore: Store }; window.top = window;
   context = vm.createContext({ window, location, URL, console, TextDecoder, Uint8Array, ArrayBuffer, require: () => ({ contextBridge: {
     executeInMainWorld: ({ func }) => vm.runInContext(`(${func.toString()})()`, context),
   } }) });
   vm.runInContext(source, context);
   const socket = new window.WebSocket("ws://localhost/api/ws");
-  return { window, socket, Socket };
+  return { window, socket, Socket, Store };
 }
 async function send(socket, value) { socket.receive(value); await new Promise(resolve => setTimeout(resolve, 0)); }
 const activity = (usedTokens, turnId = "turn-a", maxTokens = 200000, time = "2026-10-03T10:00:00Z") => ({ kind: "context-window.updated", turnId, createdAt: time, payload: { usedTokens, maxTokens, privateField: "never forwarded" } });
@@ -74,4 +78,33 @@ test("current V2 provider-turn measurements exclude subagents and preserve compl
   await send(socket, { event: { type: "provider-turn.updated", threadId: "thread-a", payload: { id: "turn-a", nodeId: "root", status: "completed" } } });
   assert.equal(window.__T3_MODS_TELEMETRY__.get().complete, true);
   assert.equal(events.at(-1).name, "turn.complete");
+});
+
+test("warm cached thread hydrates usage and root ownership before resumed socket updates", async () => {
+  const { window, socket, Store } = harness();
+  const cached = { schemaVersion: 3, environmentId: "remote", threadId: "thread-a", snapshot: { projection: {
+    thread: { id: "thread-a" },
+    nodes: [{ id: "root", kind: "root_turn", threadId: "thread-a" }, ...Array.from({ length: 1200 }, (_, i) => ({ id: `tool-${i}`, kind: "tool_call", threadId: "thread-a" }))],
+    providerTurns: [{ id: "turn-a", nodeId: "root", status: "completed", tokenUsage: { usedTokens: 198923, maxTokens: 258400, updatedAt: "2026-10-03T09:35:02.684Z" } }],
+  } } };
+  const ignored = new Store("catalog").get("auth");
+  ignored.result = JSON.stringify(cached); ignored.dispatchEvent(new Event("success"));
+  assert.equal(window.__T3_MODS_TELEMETRY__.get(), null);
+  const request = new Store().get("remote:thread-a");
+  assert.equal(request.key, "remote:thread-a");
+  request.result = JSON.stringify(cached); request.dispatchEvent(new Event("success"));
+  assert.equal(window.__T3_MODS_TELEMETRY__.get().usedTokens, 198923);
+  assert.equal(window.__T3_MODS_TELEMETRY__.get().complete, true);
+  await send(socket, { values: [{ event: { type: "provider-turn.updated", threadId: "thread-a", payload: { id: "turn-a", nodeId: "root", status: "completed", tokenUsage: { usedTokens: 198990, maxTokens: 258400, updatedAt: "2026-10-03T09:35:03.684Z" } } } }] });
+  assert.equal(window.__T3_MODS_TELEMETRY__.get().usedTokens, 198990);
+});
+
+test("unary RPC success snapshots are observed without inspecting failure data", async () => {
+  const { window, socket } = harness();
+  const value = { projection: { thread: { id: "thread-a" }, nodes: [{ id: "root", kind: "root_turn", threadId: "thread-a" }], providerTurns: [{ id: "turn-a", nodeId: "root", status: "completed", tokenUsage: { usedTokens: 89260, maxTokens: null, updatedAt: "2026-10-03T10:52:52.242Z" } }] } };
+  await send(socket, { _tag: "Exit", exit: { _tag: "Failure", value } });
+  assert.equal(window.__T3_MODS_TELEMETRY__.get(), null);
+  await send(socket, { _tag: "Exit", exit: { _tag: "Success", value } });
+  assert.equal(window.__T3_MODS_TELEMETRY__.get().usedTokens, 89260);
+  assert.equal(window.__T3_MODS_TELEMETRY__.get().maxTokens, null);
 });

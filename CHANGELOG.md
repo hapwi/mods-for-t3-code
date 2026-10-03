@@ -17,6 +17,9 @@
 
 ### Fixed
 
+- Start mods immediately after confirmed installation, simplify Import labels and row actions, and keep composer bands compact and outside T3’s input surface. Teach the authoring prompt T3’s supported surfaces, theme conventions, and live lifecycle.
+- Read measured context from T3’s warm thread-cache hydration and successful RPC snapshots; keep tool items from evicting root ownership in long threads.
+
 - Match the Mods footer icon to native utility buttons and replace the oversized manager with compact T3-style dialogs, settings rows, switches, typography, and theme tokens. Verify icon sizing/placement and inline Settings in a focused browser fixture.
 
 - Confirm macOS signing and the visible Mods sidebar entry in the existing installed Nightly app. Refresh the host on repeated installation without creating another app.

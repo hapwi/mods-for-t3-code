@@ -30,6 +30,7 @@ function row(title, description, controls = [], extra = []) {
   const heading = typeof title === "string" ? node("h2", { text: title }) : node("h2", {}, title);
   return node("article", { class: "row" }, [node("div", { class: "row-text" }, [heading, ...(description ? [node("p", { text: description })] : []), ...extra]), node("div", { class: "row-actions" }, controls)]);
 }
+const MORE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>';
 const note = (text) => node("div", { class: "row" }, [node("p", { class: "explain", text })]);
 
 export async function mount(options) {
@@ -75,6 +76,42 @@ export async function mount(options) {
   let decisionQueue = Promise.resolve();
   let telemetry;
   let unsubscribeTelemetry;
+  let menu;
+
+  // Compact overflow menu (T3 menu metrics). It lives inside the dialog so a modal
+  // dialog doesn't make it inert; fixed positioning escapes the scrolling content.
+  function closeMenu(restoreFocus = false) {
+    if (!menu) return;
+    const { popup, trigger } = menu; menu = undefined;
+    popup.remove(); trigger.setAttribute("aria-expanded", "false");
+    if (restoreFocus && trigger.isConnected) trigger.focus();
+  }
+  function moreButton(label, items) {
+    const trigger = node("button", { type: "button", class: "ghost icon xs", "aria-label": label, title: label, "aria-haspopup": "menu", "aria-expanded": "false" });
+    trigger.insertAdjacentHTML("afterbegin", MORE_ICON);
+    trigger.onclick = () => { if (menu?.trigger === trigger) closeMenu(); else openMenu(trigger, items); };
+    trigger.onkeydown = (event) => { if (event.key === "ArrowDown" && menu?.trigger !== trigger) { event.preventDefault(); openMenu(trigger, items); } };
+    return trigger;
+  }
+  function openMenu(trigger, items) {
+    closeMenu();
+    const entries = items.map(([text, action, className = ""]) => node("button", { type: "button", role: "menuitem", tabIndex: -1, class: className, text, onclick: () => { closeMenu(true); action(); } }));
+    const popup = node("div", { class: "menu", role: "menu", "aria-label": trigger.getAttribute("aria-label") }, entries);
+    popup.addEventListener("keydown", (event) => {
+      const index = entries.indexOf(shadow.activeElement);
+      const move = { ArrowDown: index + 1, ArrowUp: index - 1, Home: 0, End: entries.length - 1 }[event.key];
+      if (move !== undefined) { event.preventDefault(); entries[(move + entries.length) % entries.length].focus(); }
+      else if (event.key === "Tab") { event.preventDefault(); closeMenu(true); }
+    });
+    dialog.append(popup);
+    const box = trigger.getBoundingClientRect();
+    const below = box.bottom + 4 + popup.offsetHeight <= innerHeight - 8;
+    popup.style.top = `${below ? box.bottom + 4 : Math.max(8, box.top - 4 - popup.offsetHeight)}px`;
+    popup.style.left = `${Math.max(8, Math.min(innerWidth - popup.offsetWidth - 8, box.right - popup.offsetWidth))}px`;
+    trigger.setAttribute("aria-expanded", "true"); menu = { popup, trigger }; entries[0]?.focus();
+  }
+  const onPointerDown = (event) => { if (menu && !event.composedPath().some((target) => target === menu.popup || target === menu.trigger)) closeMenu(); };
+  const onViewportChange = () => closeMenu();
 
   function ask(title, description, action, destructive = false) {
     const result = decisionQueue.then(() => new Promise((resolve) => {
@@ -248,7 +285,8 @@ export async function mount(options) {
     document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   function render() {
-    const actions = [button("Import…", pickFile, "xs")];
+    closeMenu();
+    const actions = [button("Import", pickFile, "xs")];
     if (!inlineContent) actions.push(closeButton(closeManager));
     dialog.replaceChildren(node("header", {}, [node("div", {}, [node("h1", { text: "Mods" }), node("p", { text: "Local add-ons for T3 Code. Each mod runs isolated and can be switched off at any time." })]), node("div", { class: "header-actions" }, actions)]));
     if (candidate) { renderReview(); return; }
@@ -264,13 +302,15 @@ export async function mount(options) {
         const state = paused ? "Paused" : runtimes.has(manifest.id) ? "Active" : "Off";
         const count = manifest.permissions.length;
         return row([document.createTextNode(manifest.name), node("span", { class: "state", "data-state": state.toLowerCase(), text: state })], manifest.description, [
-          button("Details", () => { candidate = validateBundle(record); detailsOnly = true; render(); }, "ghost xs"),
-          button("Export", () => download(record), "ghost xs"),
-          button("Remove", () => void run(async () => { if (!await ask(`Remove ${manifest.name}?`, "The mod and its private data will be removed. Export it first if you want a copy.", "Remove mod", true)) return; stop(manifest.id); await database.remove(manifest.id); records = records.filter((item) => item !== record); broadcast(); }), "danger xs"),
+          moreButton(`More actions for ${manifest.name}`, [
+            ["Details", () => { candidate = validateBundle(record); detailsOnly = true; render(); }],
+            ["Export", () => download(record)],
+            ["Remove", () => void run(async () => { if (!await ask(`Remove ${manifest.name}?`, "The mod and its private data will be removed. Export it first if you want a copy.", "Remove mod", true)) return; stop(manifest.id); await database.remove(manifest.id); records = records.filter((item) => item !== record); broadcast(); }), "danger"],
+          ]),
           enabled,
         ], [node("div", { class: "meta", text: `${manifest.version} · ${manifest.author} · ${count} permission${count === 1 ? "" : "s"}` }), ...(record.quarantined ? [node("p", { class: "error", text: `Stopped: ${record.quarantined}. Switch it on to retry.` })] : [])]);
       });
-      if (!list.length) list.push(row("No mods installed", "Import a .t3mod file, or describe a mod and let your AI build it.", [button("Import…", pickFile, "xs"), button("Create", () => go("create"), "xs")]));
+      if (!list.length) list.push(row("No mods installed", "Import a .t3mod file, or describe a mod and let your AI build it.", [button("Import", pickFile, "xs"), button("Create", () => go("create"), "xs")]));
       content.append(section("Installed", list, node("span", { class: "meta", text: options.safeMode ? "Safe mode" : `${records.length} installed · ${runtimes.size} active` })));
       const pause = toggle(paused, "Pause all mods", options.safeMode || busy);
       pause.onchange = () => void run(async () => { paused = pause.checked; if (paused) for (const id of [...runtimes.keys()]) stop(id); await database.setSetting("paused", paused); broadcast(); await reload(); });
@@ -282,7 +322,7 @@ export async function mount(options) {
       ]));
     } else if (tab === "examples") {
       const list = (options.examples ?? []).map((bundle) => row(bundle.manifest.name, bundle.manifest.description, [button("Review", () => { detailsOnly = false; candidate = validateBundle(bundle); render(); }, "xs")]));
-      content.append(section("Built-in", list.length ? list : [note("No built-in mods in this build.")]), node("p", { class: "explain", text: "Included with Mods for T3 Code. Installed mods stay off until you switch them on. Themes use T3’s own color tokens and restore your appearance when turned off." }));
+      content.append(section("Built-in", list.length ? list : [note("No built-in mods in this build.")]), node("p", { class: "explain", text: "Included with Mods for T3 Code. A mod starts as soon as you review and install it. Themes use T3’s own color tokens and restore your appearance when turned off." }));
     } else if (tab === "commands") {
       const search = node("input", { type: "search", placeholder: "Find a mod command…", "aria-label": "Find command" });
       const list = node("div"); content.append(search, section("Commands", [list]));
@@ -321,12 +361,14 @@ export async function mount(options) {
       content.append(node("details", {}, [node("summary", { text: "JavaScript source" }), node("pre", { class: "review-code", text: candidate.code })]));
       footer.append(button("Done", () => { candidate = undefined; detailsOnly = false; render(); }, "xs")); dialog.append(content, footer); return;
     }
-    content.append(node("p", { class: "explain", text: "Install code from authors you trust. Mod code is isolated from T3’s files and credentials, but a mod can consume browser resources and use every permission listed above." }), node("details", {}, [node("summary", { text: "Review JavaScript source" }), node("pre", { class: "review-code", text: candidate.code })]));
+    content.append(node("p", { class: "explain", text: "Install code from authors you trust. The mod starts as soon as you install it. Mod code is isolated from T3’s files and credentials, but a mod can consume browser resources and use every permission listed above." }), node("details", {}, [node("summary", { text: "Review JavaScript source" }), node("pre", { class: "review-code", text: candidate.code })]));
     footer.append(button("Cancel", () => void run(async () => { await remember(candidate); candidate = candidates.shift(); }), "xs"), button(previous ? "Update mod" : "Install mod", () => void run(async () => {
       const bundle = candidate; stop(manifest.id);
-      const record = { ...bundle, enabled: false, quarantined: null }; delete record.inboxHash;
-      await database.save(record); await remember(bundle); records = await database.list(); candidate = candidates.shift(); broadcast();
-      notify(manifest.name, "Installed. Switch it on when you’re ready.");
+      // Confirming the review is the consent to run it; pause and safe mode still win in start().
+      const record = { ...bundle, enabled: true, quarantined: null }; delete record.inboxHash;
+      await database.save(record); await remember(bundle); records = await database.list(); candidate = candidates.shift();
+      start(records.find((item) => item.manifest.id === manifest.id) ?? record); broadcast();
+      notify(manifest.name, options.safeMode ? "Installed. Mods are off in safe mode." : paused ? "Installed. It will start when you resume mods." : "Installed and switched on.");
     }), "primary xs")); dialog.append(content, footer);
   }
   function onInput(event) {
@@ -396,9 +438,12 @@ export async function mount(options) {
   const onKeys = (event) => {
     if (event.key !== "Escape" || !shadow.querySelector("dialog[open]")) return;
     event.stopPropagation();
+    if (menu) { event.preventDefault(); closeMenu(true); return; }
     if (dialog.open && shadow.querySelectorAll("dialog[open]").length === 1) { event.preventDefault(); if (inlineContent) leaveInline(); else dialog.close(); }
   };
   document.addEventListener("keydown", onKeys, true);
+  document.addEventListener("pointerdown", onPointerDown, true);
+  shadow.addEventListener("scroll", onViewportChange, true); window.addEventListener("scroll", onViewportChange, true); window.addEventListener("resize", onViewportChange);
   try { channel = new BroadcastChannel("mods-for-t3-code"); channel.onmessage = () => void reload(); } catch { /* some custom protocol versions don't expose BroadcastChannel */ }
   window.__modsForT3Code = { open, importCandidate, async dispose() {
     if (disposed) return; disposed = true;
@@ -406,7 +451,8 @@ export async function mount(options) {
     leaveInline(); detachSidebar(); observer.disconnect(); panelRoot.remove(); bandDock.dispose(); try { unsubscribeTelemetry?.(); } catch {} settingsItem?.remove(); clearTimeout(draftTimer); channel?.close();
     window.removeEventListener("popstate", onRoute);
     for (const [key, { original, wrapped }] of historyMethods) if (history[key] === wrapped) history[key] = original;
-    document.removeEventListener("input", onInput, true); document.removeEventListener("keydown", onKeys, true); root.remove(); delete window.__modsForT3Code;
+    document.removeEventListener("input", onInput, true); document.removeEventListener("keydown", onKeys, true); document.removeEventListener("pointerdown", onPointerDown, true);
+    window.removeEventListener("scroll", onViewportChange, true); window.removeEventListener("resize", onViewportChange); closeMenu(); root.remove(); delete window.__modsForT3Code;
   } };
   connectTelemetry();
   await reload();

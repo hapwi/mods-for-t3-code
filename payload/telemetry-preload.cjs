@@ -55,6 +55,9 @@ function installTelemetry() {
   }
   function node(value) {
     if (!id(value?.id) || !id(value.threadId)) return;
+    // Only root ownership is needed. Tool items must not evict root nodes in
+    // long threads and silently make their subsequent usage reports disappear.
+    if (value.kind !== "root_turn") { nodes.delete(value.id); return; }
     nodes.delete(value.id); nodes.set(value.id, { threadId: value.threadId, root: value.kind === "root_turn" });
     if (nodes.size > 1000) nodes.delete(nodes.keys().next().value);
   }
@@ -99,6 +102,7 @@ function installTelemetry() {
     for (const key of ["values", "value", "snapshot", "event"]) {
       if (value[key] && typeof value[key] === "object") inspect(value[key], depth + 1);
     }
+    if (value._tag === "Exit" && value.exit?._tag === "Success") inspect(value.exit.value, depth + 1);
   }
   function receive(data) {
     if (data instanceof ArrayBuffer) {
@@ -110,6 +114,29 @@ function installTelemetry() {
     }
     if (typeof data !== "string" || data.length > 16 * 1024 * 1024) return;
     try { inspect(JSON.parse(data)); } catch { /* Unknown future protocol: no measurements. */ }
+  }
+  // Warm opens can hydrate entirely from T3's projection cache and resume the
+  // socket after its snapshot sequence. Observe the app's own reads of this
+  // one store so root ownership and measured usage are available immediately.
+  // Never open a database or read connection, auth, or settings stores.
+  const storePrototype = window.IDBObjectStore?.prototype;
+  const nativeGet = storePrototype?.get;
+  if (typeof nativeGet === "function") {
+    storePrototype.get = function(...args) {
+      const request = Reflect.apply(nativeGet, this, args);
+      if (this.name === "thread" && this.transaction?.db?.name === "t3code:connection-runtime") {
+        request.addEventListener("success", () => {
+          const cached = request.result;
+          if (typeof cached === "string" && cached.length <= 16 * 1024 * 1024) {
+            try {
+              const value = JSON.parse(cached);
+              if (value.schemaVersion === 3 && id(value.threadId) && value.snapshot?.projection?.thread?.id === value.threadId) projection(value.snapshot.projection);
+            } catch {}
+          }
+        });
+      }
+      return request;
+    };
   }
   const NativeWebSocket = window.WebSocket;
   if (typeof NativeWebSocket === "function") {

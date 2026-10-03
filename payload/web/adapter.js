@@ -26,11 +26,28 @@ export function insertDraft(text) {
 export function dockAboveComposer(element) {
   let wanted = false;
   let frame;
+  let anchor;
+  // The band belongs outside the composer's bordered surface, like T3's banner stack.
+  // Builds differ in which element carries the form marker, so also climb to the
+  // outermost rounded, bordered ancestor and dock before whichever is outermost.
+  function composerAnchor(editor) {
+    let result = editor.closest('[data-chat-composer-form]') ?? editor.closest("form") ?? editor;
+    for (let parent = editor.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+      if (parent.matches('[data-chat-composer-overlay], main, [data-slot="sidebar-inset"]')) break;
+      if (parent.contains(result) && parent !== result) {
+        const style = getComputedStyle(parent);
+        if (parseFloat(style.borderTopWidth) > 0 && parseFloat(style.borderTopLeftRadius) >= 12) result = parent;
+      }
+    }
+    return result;
+  }
   function place() {
     frame = undefined;
     const editor = wanted ? composer() : null;
-    const anchor = editor ? editor.closest('[data-chat-composer-form]') ?? editor.closest("form") ?? editor : null;
-    if (!anchor?.parentElement) { element.remove(); return; }
+    if (!editor) { anchor = undefined; element.remove(); return; }
+    if (anchor?.isConnected && anchor.contains(editor) && element.nextElementSibling === anchor) return;
+    anchor = composerAnchor(editor);
+    if (!anchor.parentElement) { element.remove(); return; }
     if (element.nextElementSibling !== anchor) anchor.before(element);
   }
   const observer = new MutationObserver(() => { if (wanted && !frame) frame = requestAnimationFrame(place); });

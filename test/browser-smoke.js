@@ -20,8 +20,7 @@
     const focus = await (await fetch("/focus-timer.t3mod")).json();
     await window.__modsForT3Code.importCandidate(focus); click("Install mod");
     await wait(() => shadow().querySelector('input[aria-label="Enable Focus timer"]'), "install completion");
-    assert(!document.querySelector('iframe'), "New mod stays off until explicitly enabled"); results.push("permission review and disabled installation");
-    shadow().querySelector('input[aria-label="Enable Focus timer"]').click();
+    assert(shadow().querySelector('input[aria-label="Enable Focus timer"]').checked, "Confirmed installation enables the mod"); results.push("permission review and automatic enable");
     await wait(() => panelShadow()?.querySelector(".panel h2")?.textContent === "25:00", "worker panel");
     click("Close"); click("Start");
     await wait(() => panelShadow()?.querySelector(".panel h2")?.textContent !== "25:00", "timer action"); results.push("sandbox worker and live panel actions");
@@ -43,7 +42,6 @@
     const sandboxTest = { format: "t3mod/1", manifest: { apiVersion: 1, id: "isolation-test", version: "1.0.0", name: "Isolation test", description: "Checks isolation", author: "Test", permissions: ["ui.panels"] }, code: 'globalThis.T3Mod={async activate(api){let blocked=false;try{await fetch("http://127.0.0.1:4318/")}catch{blocked=true}let denied=false;try{await api.draft.read()}catch{denied=true}await api.panels.set({title:"Isolation result",body:JSON.stringify({blocked,denied,dom:typeof document,node:typeof process})});}};' };
     await window.__modsForT3Code.importCandidate(sandboxTest); click("Install mod");
     await wait(() => shadow().querySelector('input[aria-label="Enable Isolation test"]'), "isolation mod install");
-    shadow().querySelector('input[aria-label="Enable Isolation test"]').click();
     await wait(() => [...panelShadow().querySelectorAll(".panel h2")].some((item) => item.textContent === "Isolation result"), "isolation panel");
     const panel = [...panelShadow().querySelectorAll(".panel")].find((item) => item.querySelector("h2").textContent === "Isolation result");
     const value = JSON.parse(panel.querySelector("p").textContent);
@@ -62,9 +60,9 @@
     assert(weatherRow, "Token weather is a built-in mod"); weatherRow.querySelector("button").click();
     assert(shadow().textContent.includes("ui.band") && shadow().textContent.includes("session.usage"), "Band and usage permissions are reviewed");
     click("Install mod");
-    await wait(() => !shadow().querySelector('[aria-busy]') && shadow().textContent.includes("Installed. Switch it on"), "weather install");
+    await wait(() => !shadow().querySelector('[aria-busy]') && shadow().textContent.includes("Installed and switched on."), "weather install");
     window.__modsForT3Code.open();
-    shadow().querySelector('input[aria-label="Enable Token weather"]').click();
+    assert(shadow().querySelector('input[aria-label="Enable Token weather"]').checked, "Weather automatically enabled");
     await shows("Context usage unavailable", "explicit unavailable usage");
     const form = document.querySelector("[data-chat-composer-form]");
     assert(dock().nextElementSibling === form && !form.contains(dock()) && !document.querySelector('[data-testid="composer-editor"]').contains(dock()), "Band is above the composer and outside the editor");
@@ -101,7 +99,6 @@
     const theme = { ...sandboxTest, manifest: { ...sandboxTest.manifest, id: "theme-test", name: "Theme test", permissions: ["ui.theme"] }, code: 'globalThis.T3Mod={async activate(api){await api.theme.set({background:"#101820",foreground:"#f0f4f8"})}};' };
     await window.__modsForT3Code.importCandidate(theme); click("Install mod");
     await wait(() => shadow().querySelector('input[aria-label="Enable Theme test"]'), "theme install");
-    shadow().querySelector('input[aria-label="Enable Theme test"]').click();
     await wait(() => document.documentElement.style.getPropertyValue("--background") === "#101820", "theme applied");
     await wait(() => !shadow().querySelector('input[aria-label="Enable Theme test"]').disabled, "theme toggle ready");
     shadow().querySelector('input[aria-label="Enable Theme test"]').click();
@@ -110,7 +107,6 @@
     const failure = { ...sandboxTest, manifest: { ...sandboxTest.manifest, id: "broken-mod", name: "Broken mod" }, code: 'globalThis.T3Mod={activate(){while(true){}}};' };
     await window.__modsForT3Code.importCandidate(failure); click("Install mod");
     await wait(() => shadow().querySelector('input[aria-label="Enable Broken mod"]'), "broken mod install");
-    shadow().querySelector('input[aria-label="Enable Broken mod"]').click();
     await wait(() => [...shadow().querySelectorAll(".error")].some((item) => /startup|responding/.test(item.textContent)), "runaway quarantine", 12000);
     assert(!shadow().querySelector('input[aria-label="Enable Broken mod"]').checked, "Runaway mod disabled"); results.push("runaway worker quarantine");
     await window.__modsForT3Code.dispose();

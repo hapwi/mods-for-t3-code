@@ -348,11 +348,29 @@
   function dockAboveComposer(element) {
     let wanted = false;
     let frame;
+    let anchor;
+    function composerAnchor(editor) {
+      let result = editor.closest("[data-chat-composer-form]") ?? editor.closest("form") ?? editor;
+      for (let parent = editor.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+        if (parent.matches('[data-chat-composer-overlay], main, [data-slot="sidebar-inset"]')) break;
+        if (parent.contains(result) && parent !== result) {
+          const style2 = getComputedStyle(parent);
+          if (parseFloat(style2.borderTopWidth) > 0 && parseFloat(style2.borderTopLeftRadius) >= 12) result = parent;
+        }
+      }
+      return result;
+    }
     function place() {
       frame = void 0;
       const editor = wanted ? composer() : null;
-      const anchor = editor ? editor.closest("[data-chat-composer-form]") ?? editor.closest("form") ?? editor : null;
-      if (!anchor?.parentElement) {
+      if (!editor) {
+        anchor = void 0;
+        element.remove();
+        return;
+      }
+      if (anchor?.isConnected && anchor.contains(editor) && element.nextElementSibling === anchor) return;
+      anchor = composerAnchor(editor);
+      if (!anchor.parentElement) {
         element.remove();
         return;
       }
@@ -497,6 +515,12 @@ Use my existing T3 provider session. Produce a self-contained .t3mod JSON file.
 Save it to ${inbox || "the current workspace"}/<id>.t3mod. Do not change T3 itself.
 The host watches its inbox and will ask me to review the mod before it runs.
 
+T3 integration and design contract:
+This is a mod inside the existing T3 Code Electron app. T3 already owns the sidebar, Settings, thread list, conversation, composer, provider picker, and attachment drawer. Use the supported host surfaces below; do not rebuild T3, inject an overlay, invent DOM selectors, or assume a Claude Code terminal plugin API. Mods are workers, so document/window/React and T3's internal stores are unavailable. The host places and styles your output to match the current T3 theme.
+For a compact live indicator above the prompt use ui.band, with short plain text and semantic tones. Do not add a title panel or a second composer for a one-line indicator. For interactive actions use ui.panels or ui.commands. For themes use paired ui.theme tokens, including sidebar tokens when needed, instead of CSS or hardcoded layout. Keep labels concise, avoid decorative headings and redundant controls, and let the host choose fonts, spacing, borders, and light/dark colors.
+Install starts the mod immediately after permission review. It must work without restarting T3, update while the app stays open, and clean up its own timers when disabled. Treat navigation as a change of thread: do not display a previous thread's measurements on the next thread. Cache history by threadId, deduplicate completed turns by turnId, and preserve it with storage only if requested.
+Context measurements come from T3's actual provider-turn reports and cached thread projections. They are context-window usage, not subscription limits, cumulative billing totals, or a text-length estimate. A provider may return no measurement yet, and maxTokens may be unknown. Handle both states with a short muted message; never guess a 200k window, percentage, turn delta, or chart sample. Do not infer a token count from the model's name. Subscribe to both session.usage and turn.complete, and read api.session.usage() on activation. A completed turn may receive a corrected measurement later. Live indicators should render real data as soon as it arrives.
+
 Bundle format:
 {"format":"t3mod/1","manifest":{"apiVersion":1,"id":"lowercase-mod-id","version":"1.0.0","name":"Readable name","description":"What it does","author":"AI assisted","permissions":[]},"code":"globalThis.T3Mod = { async activate(api) { /* implementation */ } };"}
 
@@ -514,7 +538,7 @@ The code string is complete JavaScript, runs in an isolated browser worker, and 
 - api.log("message") is always available.
 activate may return a cleanup function. All actions should finish within 5 seconds. Timers are fine. Long loops cause quarantine. Never request permissions outside this list.
 
-Write valid JSON with properly escaped code. Do not use markdown inside the file. After writing it, tell me what it does and which permissions to review. If saving to the inbox is unavailable, save in the workspace and tell me to use Import mod in the Mods manager.`;
+Before saving, check the JavaScript syntax and JSON escaping without executing host API calls outside T3. Walk through activation, missing data, unknown window size, navigation, repeated completion events, disable, and re-enable. Do not claim a live T3 check you did not perform. Write valid JSON with properly escaped code. Do not use markdown inside the file. After writing it, tell me what it does and which permissions to review. If saving to the inbox is unavailable, save in the workspace and tell me to use Import in the Mods manager.`;
   }
 
   // payload/web/style.js
@@ -527,7 +551,7 @@ button:hover{background:color-mix(in srgb,var(--mf-accent) 60%,transparent)}butt
 button.primary{background:var(--mf-primary);border-color:var(--mf-primary);color:var(--mf-primary-fg)}button.primary:hover{background:color-mix(in srgb,var(--mf-primary) 90%,transparent)}
 button.ghost,button.danger{background:transparent;border-color:transparent;color:var(--mf-muted)}button.ghost:hover,button.danger:hover{background:var(--mf-accent);color:var(--mf-fg)}button.danger:hover{color:var(--mf-danger)}
 button.destructive{background:var(--mf-danger);border-color:var(--mf-danger);color:#fff}
-button.xs{height:24px;padding:0 7px;font-size:12px;gap:4px}button.icon{width:28px;padding:0}button svg{width:16px;height:16px;flex:none}
+button.xs{height:24px;padding:0 7px;font-size:12px;gap:4px}button.icon{width:28px;padding:0}button.icon.xs{width:24px}button svg{width:16px;height:16px;flex:none}
 input.switch{appearance:none;-webkit-appearance:none;position:relative;flex:none;width:32px;height:20px;margin:0;padding:0;border:1px solid color-mix(in srgb,var(--mf-fg) 14%,transparent);border-radius:999px;background:color-mix(in srgb,var(--mf-fg) 20%,transparent);cursor:pointer;transition:background-color .2s,border-color .2s}
 input.switch::after{content:"";position:absolute;top:1px;left:1px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0003;transition:transform .2s}
 input.switch:checked{background:var(--mf-primary);border-color:var(--mf-primary)}input.switch:checked::after{transform:translateX(12px)}input.switch:disabled{opacity:.64;cursor:default}
@@ -543,7 +567,7 @@ header{display:flex;align-items:flex-start;justify-content:space-between;gap:16p
 .content{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:16px 20px 20px;display:flex;flex-direction:column;gap:20px;scrollbar-gutter:stable}
 .section{display:flex;flex-direction:column;gap:8px}.section-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:20px;padding:0 4px}
 .section-head h2{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:color-mix(in srgb,var(--mf-fg) 50%,transparent)}.section-head h2::before{content:"";width:12px;height:1px;background:var(--mf-border)}
-.card{border:1px solid var(--mf-border);border-radius:calc(var(--mf-radius) + 6px);background:var(--mf-card);overflow:hidden}.card>.body{padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+.card{border:1px solid var(--mf-border);border-radius:calc(var(--mf-radius) + 6px);background:var(--mf-card)}.card>.body{padding:14px 16px;display:flex;flex-direction:column;gap:8px}
 .row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 16px;border-top:1px solid var(--mf-border)}.row:first-child{border-top:0}
 .row-text{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}.row h2{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;letter-spacing:-.01em;line-height:20px}.row p{font-size:12px;line-height:1.5;color:color-mix(in srgb,var(--mf-muted) 85%,transparent)}
 .row-actions{display:flex;align-items:center;gap:4px;flex:none}.row-actions input.switch{margin-left:8px}
@@ -553,8 +577,10 @@ header{display:flex;align-items:flex-start;justify-content:space-between;gap:16p
 .review-title{display:flex;flex-direction:column;gap:2px}.review-title h2{font-size:15px;font-weight:600;line-height:20px}
 details{font-size:12px}summary{cursor:pointer;color:var(--mf-muted);padding:2px 4px}summary:hover{color:var(--mf-fg)}
 .review-code,.log{margin:8px 0 0;padding:10px 12px;max-height:220px;overflow:auto;border:1px solid var(--mf-border);border-radius:var(--mf-control-radius);background:color-mix(in srgb,var(--mf-fg) 3%,transparent);font:11px/1.6 var(--font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);white-space:pre-wrap;overflow-wrap:anywhere}
-.card>.log{margin:0;border:0;border-radius:0;max-height:none;min-height:120px;background:transparent}
+.card>.log{margin:0;border:0;border-radius:inherit;max-height:none;min-height:120px;background:transparent}
 .actions{display:flex;align-items:center;justify-content:flex-end;gap:8px}.footer{flex:none;padding:12px 20px;border-top:1px solid var(--mf-border);background:color-mix(in srgb,var(--mf-fg) 2%,transparent)}
+.menu{position:fixed;z-index:10;min-width:140px;padding:4px;display:flex;flex-direction:column;border:1px solid var(--mf-border);border-radius:var(--mf-radius);background:var(--mf-popover);box-shadow:0 8px 24px #00000029}
+.menu button{justify-content:flex-start;height:28px;padding:0 8px;border:0;border-radius:calc(var(--mf-radius) - 4px);background:transparent;color:var(--mf-fg);font-weight:400;outline:none}.menu button:hover,.menu button:focus-visible{background:var(--mf-accent)}.menu button.danger{color:var(--mf-danger)}
 .decision-preview{white-space:pre-wrap;overflow-wrap:anywhere}
 :host([data-inline]){display:flex;flex-direction:column;flex:1;min-height:0}
 dialog[data-inline]{position:static;flex:1;min-height:0;width:100%;height:auto;max-width:none;max-height:none;margin:0;border:0;border-radius:0;box-shadow:none;background:transparent}
@@ -565,7 +591,7 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
 .panel{padding:10px;border-top:1px solid var(--mf-border)}.panel h2{font-size:13px;font-weight:600;margin:1px 0 4px}.panel p{font-size:12px;line-height:1.5;color:var(--mf-muted);white-space:pre-wrap}.panel .actions{justify-content:flex-start;flex-wrap:wrap;gap:4px;margin-top:8px}
 .panel-tray[data-docked]{position:relative;inset:auto;width:100%;max-height:30vh;box-shadow:none;z-index:auto;margin-bottom:8px;background:var(--mf-card)}
 @media(max-width:600px){header{padding:16px 16px 10px}.tabs{margin-inline:16px;max-width:calc(100% - 32px)}.content{padding:12px 16px 16px}.row{flex-direction:column;align-items:stretch;gap:8px}.row-actions{justify-content:flex-start;flex-wrap:wrap}.panel-tray{width:280px}}
-.band-stack{width:calc(100% - 2 * var(--chat-composer-drawer-inset,1.375rem));margin:0 auto -1rem;padding:5px 14px calc(1rem + 5px);border:1px solid var(--chat-composer-attached-outline,var(--mf-border));border-bottom:0;border-radius:1rem 1rem 0 0;background:var(--chat-composer-attached-surface,var(--card,var(--mf-bg)));font-size:12px;line-height:1.6}.band{white-space:pre;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}.band [data-tone=muted]{color:var(--mf-muted)}.band [data-tone=yellow]{color:var(--color-yellow-500,#d4a72c)}.band [data-tone=cyan]{color:var(--color-cyan-500,#22a8bd)}.band [data-tone=blue]{color:var(--info,var(--color-blue-500,#3b82f6))}.band [data-tone=magenta]{color:var(--color-fuchsia-500,#c85bd8)}.band [data-tone=red]{color:var(--destructive,#e5534b)}
+.band-stack{max-width:48rem;margin:0 auto 6px;padding:0 14px;font-size:12px;line-height:18px;color:var(--mf-muted)}.band{white-space:pre;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}.band [data-tone=muted]{color:var(--mf-muted)}.band [data-tone=yellow]{color:var(--color-yellow-500,#d4a72c)}.band [data-tone=cyan]{color:var(--color-cyan-500,#22a8bd)}.band [data-tone=blue]{color:var(--info,var(--color-blue-500,#3b82f6))}.band [data-tone=magenta]{color:var(--color-fuchsia-500,#c85bd8)}.band [data-tone=red]{color:var(--destructive,#e5534b)}
 `;
 
   // payload/web/themes.js
@@ -650,6 +676,7 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
     const heading = typeof title === "string" ? node("h2", { text: title }) : node("h2", {}, title);
     return node("article", { class: "row" }, [node("div", { class: "row-text" }, [heading, ...description ? [node("p", { text: description })] : [], ...extra]), node("div", { class: "row-actions" }, controls)]);
   }
+  var MORE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>';
   var note = (text) => node("div", { class: "row" }, [node("p", { class: "explain", text })]);
   async function mount(options) {
     if (window.__modsForT3Code) return;
@@ -694,6 +721,61 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
     let decisionQueue = Promise.resolve();
     let telemetry;
     let unsubscribeTelemetry;
+    let menu;
+    function closeMenu(restoreFocus = false) {
+      if (!menu) return;
+      const { popup, trigger } = menu;
+      menu = void 0;
+      popup.remove();
+      trigger.setAttribute("aria-expanded", "false");
+      if (restoreFocus && trigger.isConnected) trigger.focus();
+    }
+    function moreButton(label, items) {
+      const trigger = node("button", { type: "button", class: "ghost icon xs", "aria-label": label, title: label, "aria-haspopup": "menu", "aria-expanded": "false" });
+      trigger.insertAdjacentHTML("afterbegin", MORE_ICON);
+      trigger.onclick = () => {
+        if (menu?.trigger === trigger) closeMenu();
+        else openMenu(trigger, items);
+      };
+      trigger.onkeydown = (event) => {
+        if (event.key === "ArrowDown" && menu?.trigger !== trigger) {
+          event.preventDefault();
+          openMenu(trigger, items);
+        }
+      };
+      return trigger;
+    }
+    function openMenu(trigger, items) {
+      closeMenu();
+      const entries = items.map(([text, action, className = ""]) => node("button", { type: "button", role: "menuitem", tabIndex: -1, class: className, text, onclick: () => {
+        closeMenu(true);
+        action();
+      } }));
+      const popup = node("div", { class: "menu", role: "menu", "aria-label": trigger.getAttribute("aria-label") }, entries);
+      popup.addEventListener("keydown", (event) => {
+        const index = entries.indexOf(shadow.activeElement);
+        const move = { ArrowDown: index + 1, ArrowUp: index - 1, Home: 0, End: entries.length - 1 }[event.key];
+        if (move !== void 0) {
+          event.preventDefault();
+          entries[(move + entries.length) % entries.length].focus();
+        } else if (event.key === "Tab") {
+          event.preventDefault();
+          closeMenu(true);
+        }
+      });
+      dialog.append(popup);
+      const box = trigger.getBoundingClientRect();
+      const below = box.bottom + 4 + popup.offsetHeight <= innerHeight - 8;
+      popup.style.top = `${below ? box.bottom + 4 : Math.max(8, box.top - 4 - popup.offsetHeight)}px`;
+      popup.style.left = `${Math.max(8, Math.min(innerWidth - popup.offsetWidth - 8, box.right - popup.offsetWidth))}px`;
+      trigger.setAttribute("aria-expanded", "true");
+      menu = { popup, trigger };
+      entries[0]?.focus();
+    }
+    const onPointerDown = (event) => {
+      if (menu && !event.composedPath().some((target) => target === menu.popup || target === menu.trigger)) closeMenu();
+    };
+    const onViewportChange = () => closeMenu();
     function ask(title, description, action, destructive = false) {
       const result = decisionQueue.then(() => new Promise((resolve) => {
         const prompt = node("dialog", { class: "ask", "aria-label": title }, [node("header", {}, [node("h1", { text: title })]), node("div", { class: "content" }, [node("p", { class: "explain decision-preview", text: description })]), node("div", { class: "footer actions" }, [button("Cancel", () => finish(false)), button(action, () => finish(true), destructive ? "destructive" : "primary")])]);
@@ -981,7 +1063,8 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
       setTimeout(() => URL.revokeObjectURL(url), 1e3);
     }
     function render() {
-      const actions = [button("Import\u2026", pickFile, "xs")];
+      closeMenu();
+      const actions = [button("Import", pickFile, "xs")];
       if (!inlineContent) actions.push(closeButton(closeManager));
       dialog.replaceChildren(node("header", {}, [node("div", {}, [node("h1", { text: "Mods" }), node("p", { text: "Local add-ons for T3 Code. Each mod runs isolated and can be switched off at any time." })]), node("div", { class: "header-actions" }, actions)]));
       if (candidate) {
@@ -1010,23 +1093,25 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
           const state = paused ? "Paused" : runtimes.has(manifest.id) ? "Active" : "Off";
           const count = manifest.permissions.length;
           return row([document.createTextNode(manifest.name), node("span", { class: "state", "data-state": state.toLowerCase(), text: state })], manifest.description, [
-            button("Details", () => {
-              candidate = validateBundle(record);
-              detailsOnly = true;
-              render();
-            }, "ghost xs"),
-            button("Export", () => download(record), "ghost xs"),
-            button("Remove", () => void run(async () => {
-              if (!await ask(`Remove ${manifest.name}?`, "The mod and its private data will be removed. Export it first if you want a copy.", "Remove mod", true)) return;
-              stop(manifest.id);
-              await database.remove(manifest.id);
-              records = records.filter((item) => item !== record);
-              broadcast();
-            }), "danger xs"),
+            moreButton(`More actions for ${manifest.name}`, [
+              ["Details", () => {
+                candidate = validateBundle(record);
+                detailsOnly = true;
+                render();
+              }],
+              ["Export", () => download(record)],
+              ["Remove", () => void run(async () => {
+                if (!await ask(`Remove ${manifest.name}?`, "The mod and its private data will be removed. Export it first if you want a copy.", "Remove mod", true)) return;
+                stop(manifest.id);
+                await database.remove(manifest.id);
+                records = records.filter((item) => item !== record);
+                broadcast();
+              }), "danger"]
+            ]),
             enabled
           ], [node("div", { class: "meta", text: `${manifest.version} \xB7 ${manifest.author} \xB7 ${count} permission${count === 1 ? "" : "s"}` }), ...record.quarantined ? [node("p", { class: "error", text: `Stopped: ${record.quarantined}. Switch it on to retry.` })] : []]);
         });
-        if (!list.length) list.push(row("No mods installed", "Import a .t3mod file, or describe a mod and let your AI build it.", [button("Import\u2026", pickFile, "xs"), button("Create", () => go("create"), "xs")]));
+        if (!list.length) list.push(row("No mods installed", "Import a .t3mod file, or describe a mod and let your AI build it.", [button("Import", pickFile, "xs"), button("Create", () => go("create"), "xs")]));
         content.append(section("Installed", list, node("span", { class: "meta", text: options.safeMode ? "Safe mode" : `${records.length} installed \xB7 ${runtimes.size} active` })));
         const pause = toggle(paused, "Pause all mods", options.safeMode || busy);
         pause.onchange = () => void run(async () => {
@@ -1051,7 +1136,7 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
           candidate = validateBundle(bundle);
           render();
         }, "xs")]));
-        content.append(section("Built-in", list.length ? list : [note("No built-in mods in this build.")]), node("p", { class: "explain", text: "Included with Mods for T3 Code. Installed mods stay off until you switch them on. Themes use T3\u2019s own color tokens and restore your appearance when turned off." }));
+        content.append(section("Built-in", list.length ? list : [note("No built-in mods in this build.")]), node("p", { class: "explain", text: "Included with Mods for T3 Code. A mod starts as soon as you review and install it. Themes use T3\u2019s own color tokens and restore your appearance when turned off." }));
       } else if (tab === "commands") {
         let show = function() {
           list.replaceChildren();
@@ -1117,21 +1202,22 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
         dialog.append(content, footer);
         return;
       }
-      content.append(node("p", { class: "explain", text: "Install code from authors you trust. Mod code is isolated from T3\u2019s files and credentials, but a mod can consume browser resources and use every permission listed above." }), node("details", {}, [node("summary", { text: "Review JavaScript source" }), node("pre", { class: "review-code", text: candidate.code })]));
+      content.append(node("p", { class: "explain", text: "Install code from authors you trust. The mod starts as soon as you install it. Mod code is isolated from T3\u2019s files and credentials, but a mod can consume browser resources and use every permission listed above." }), node("details", {}, [node("summary", { text: "Review JavaScript source" }), node("pre", { class: "review-code", text: candidate.code })]));
       footer.append(button("Cancel", () => void run(async () => {
         await remember(candidate);
         candidate = candidates.shift();
       }), "xs"), button(previous ? "Update mod" : "Install mod", () => void run(async () => {
         const bundle = candidate;
         stop(manifest.id);
-        const record = { ...bundle, enabled: false, quarantined: null };
+        const record = { ...bundle, enabled: true, quarantined: null };
         delete record.inboxHash;
         await database.save(record);
         await remember(bundle);
         records = await database.list();
         candidate = candidates.shift();
+        start(records.find((item) => item.manifest.id === manifest.id) ?? record);
         broadcast();
-        notify(manifest.name, "Installed. Switch it on when you\u2019re ready.");
+        notify(manifest.name, options.safeMode ? "Installed. Mods are off in safe mode." : paused ? "Installed. It will start when you resume mods." : "Installed and switched on.");
       }), "primary xs"));
       dialog.append(content, footer);
     }
@@ -1147,10 +1233,10 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
     function settingsNav() {
       const content = document.querySelector('[data-sidebar="content"]') ?? document.querySelector('[data-slot="sidebar-content"]');
       const menus = content ? [...content.querySelectorAll('[data-sidebar="menu"], [data-slot="sidebar-menu"], ul')] : [];
-      return menus.find((menu) => navItems(menu).some((item) => /\b(general|appearance|providers|keybindings)\b/i.test(item.textContent))) ?? null;
+      return menus.find((menu2) => navItems(menu2).some((item) => /\b(general|appearance|providers|keybindings)\b/i.test(item.textContent))) ?? null;
     }
-    function navItems(menu) {
-      return [...menu.querySelectorAll("button, a")].filter((item) => !item.closest("[data-t3mods]") && item.textContent.trim());
+    function navItems(menu2) {
+      return [...menu2.querySelectorAll("button, a")].filter((item) => !item.closest("[data-t3mods]") && item.textContent.trim());
     }
     function styleSettingsControl(active) {
       const control = settingsItem?.querySelector("button");
@@ -1172,9 +1258,9 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
     }
     function attachSettings() {
       if (!location.pathname.startsWith("/settings") || settingsItem?.isConnected) return;
-      const menu = settingsNav();
-      if (!menu) return;
-      const nativeItem = navItems(menu)[0]?.closest("li");
+      const menu2 = settingsNav();
+      if (!menu2) return;
+      const nativeItem = navItems(menu2)[0]?.closest("li");
       const item = node("li", { "data-t3mods": "settings-section", class: nativeItem?.className ?? "" });
       for (const name of ["data-slot", "data-sidebar"]) {
         const value = nativeItem?.getAttribute(name);
@@ -1184,7 +1270,7 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
       const control = node("button", { type: "button", onclick: openSettings }, [node("span", { text: "Mods" })]);
       control.insertAdjacentHTML("afterbegin", MODS_ICON);
       item.append(control);
-      menu.append(item);
+      menu2.append(item);
       settingsItem = item;
       styleSettingsControl(Boolean(inlineContent));
     }
@@ -1237,6 +1323,11 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
     const onKeys = (event) => {
       if (event.key !== "Escape" || !shadow.querySelector("dialog[open]")) return;
       event.stopPropagation();
+      if (menu) {
+        event.preventDefault();
+        closeMenu(true);
+        return;
+      }
       if (dialog.open && shadow.querySelectorAll("dialog[open]").length === 1) {
         event.preventDefault();
         if (inlineContent) leaveInline();
@@ -1244,6 +1335,10 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
       }
     };
     document.addEventListener("keydown", onKeys, true);
+    document.addEventListener("pointerdown", onPointerDown, true);
+    shadow.addEventListener("scroll", onViewportChange, true);
+    window.addEventListener("scroll", onViewportChange, true);
+    window.addEventListener("resize", onViewportChange);
     try {
       channel = new BroadcastChannel("mods-for-t3-code");
       channel.onmessage = () => void reload();
@@ -1269,6 +1364,10 @@ ${text}`, "Add to draft") || runtime2.stopped) return false;
       for (const [key, { original, wrapped }] of historyMethods) if (history[key] === wrapped) history[key] = original;
       document.removeEventListener("input", onInput, true);
       document.removeEventListener("keydown", onKeys, true);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("scroll", onViewportChange, true);
+      window.removeEventListener("resize", onViewportChange);
+      closeMenu();
       root.remove();
       delete window.__modsForT3Code;
     } };

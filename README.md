@@ -47,8 +47,8 @@ Invoke-WebRequest https://raw.githubusercontent.com/hapwi/mods-for-t3-code/main/
 Open the puzzle icon at the bottom of T3’s sidebar, or **Settings → Mods**.
 
 - **Built-in:** install Token Weather, Focus Timer, Prompt Kit, Midnight Theme, or Paper Theme.
-- **Installed:** enable, disable, inspect source and permissions, export, update, or remove a mod. New imports start disabled.
-- **Create:** describe a mod and put the generated authoring prompt into the current T3 composer. Choose your already logged-in provider/model and send it normally. The agent writes a `.t3mod` bundle to the watched inbox; the manager presents it for review immediately. No separate AI account or API key is required.
+- **Installed:** enable, disable, inspect source and permissions, export, update, or remove a mod. Confirming installation switches the mod on immediately; Pause all and safe mode still prevent it from running. Row actions are in the ⋯ menu.
+- **Create:** describe a mod and put the generated authoring prompt into the current T3 composer. Choose your already logged-in provider/model and send it normally. The agent writes a `.t3mod` bundle to the watched inbox; the manager presents it for review immediately. No separate AI account or API key is required. The authoring prompt includes T3’s supported UI surfaces, theme conventions, live lifecycle, and handling for missing context data.
 - **Development mode:** automatically apply inbox changes to an enabled mod with the same author and no additional permissions. Expanded permissions always require review.
 - **Activity:** inspect mod errors and quarantine reasons. **Pause all** stops every mod immediately.
 
@@ -64,7 +64,7 @@ A compact, colored line above the prompt shows the measured context percentage, 
 
 Weather thresholds are Clear below 25%, Cloudy below 50%, Showers below 75%, Storm below 90%, and Compact soon at 90% or higher. Measurements refresh as T3 reports them; history advances on completed turns. Compaction can produce a negative change.
 
-Counts come from T3’s normalized provider usage reports, not text-length estimates or account rate limits. Providers and older T3 versions may omit context measurements or window size; the mod explicitly shows an unavailable state. History is separate for each thread.
+Counts come from T3’s normalized provider usage reports, including warm thread-cache hydration, not text-length estimates or account rate limits. Providers and older T3 versions may omit context measurements or window size; the mod explicitly shows an unavailable state. History is separate for each thread.
 
 ## Updates and recovery
 
@@ -106,7 +106,7 @@ node bin/cli.mjs pack examples/focus-timer --out focus-timer.t3mod
 node bin/cli.mjs validate focus-timer.t3mod
 ```
 
-Share the `.t3mod` file. Recipients import it from the manager, inspect permissions/source, and enable it. Files in the inbox follow the same review flow. SDK types are in [sdk.d.ts](sdk.d.ts); authoring examples are in [examples](examples).
+Share the `.t3mod` file. Recipients import it from the manager, inspect permissions/source, and confirm installation to activate it. Files in the inbox follow the same review flow. SDK types are in [sdk.d.ts](sdk.d.ts); authoring examples are in [examples](examples).
 
 Mod code runs in isolated workers inside opaque sandboxed iframes. It has no direct access to Electron, Node, the app DOM, network, provider credentials, or T3’s database. Host capabilities are checked on every call. UI uses bounded text and approved theme tokens; private storage is limited to 64 KB per mod. This is a practical isolation layer, not a guarantee against browser vulnerabilities.
 
