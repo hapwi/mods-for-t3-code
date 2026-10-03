@@ -126,6 +126,6 @@ node scripts/browser-check.mjs
 
 `dist/` is committed so end-user installations need no build toolchain. Regenerate it when runtime or bundled mods change. Focused archive, manifest, telemetry, and update tests live under `test/`; set `MODS_FOR_T3_DATA` to a temporary directory when running installer tests.
 
-Linux archive patching and AppImage extraction were exercised against T3 `0.0.46-nightly.20261003.2623`. Browser integration exercises the actual renderer/worker host in a small fixture with T3 selectors and CSP. macOS signing, Windows installation, and their native updater flows still require platform testing; platform support is implemented but should be treated as experimental until those checks are completed.
+Linux archive patching, AppImage extraction, and the published curl installation flow were exercised against T3 `0.0.46-nightly.20261003.2623` using a temporary copy. The telemetry preload was checked in an isolated Electron 44 fixture with sandbox and context isolation enabled. Browser integration exercises the actual renderer/worker host in a small fixture with T3 selectors and CSP; the interface has not yet been visually checked in a running T3 app. macOS signing, Windows installation, and their native updater flows still require platform testing; platform support is implemented but should be treated as experimental until those checks are completed.
 
 See [architecture](docs/architecture.md), [changelog](CHANGELOG.md), and [license](LICENSE).

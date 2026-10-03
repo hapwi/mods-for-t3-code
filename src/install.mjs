@@ -211,7 +211,7 @@ export async function detectInstallation() {
     "/opt/T3 Code/resources/app.asar", "/opt/t3-code/resources/app.asar", "/opt/t3code/resources/app.asar",
   ] : platform() === "win32" ? [path.join(process.env.LOCALAPPDATA || root, "Programs", "T3 Code", "resources", "app.asar")] : [];
   for (const candidate of candidates) if (await exists(candidate)) return candidate;
-  throw new Error("T3 was not found automatically. Pass --appimage /path/to/T3-Code.AppImage or --asar /path/to/resources/app.asar. Signed macOS packages are currently unsupported.");
+  throw new Error("T3 was not found automatically. Pass --appimage /path/to/T3-Code.AppImage or --asar /path/to/resources/app.asar; use --mac-app or --windows-dir for native installations.");
 }
 
 export async function launchApp(args = []) {

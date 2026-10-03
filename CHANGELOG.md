@@ -13,6 +13,7 @@
 - Observe measured context usage and turn completion through a read-only preload supporting current and earlier T3 event formats.
 - Add Token Weather above the prompt with live weather thresholds, measured token counts, a 12-turn sparkline, and per-thread completed-turn deltas.
 - Document installation, mod authoring, architecture, recovery, updates, and native-platform validation limits.
+- Record the published Linux curl installer and isolated Electron telemetry checks, and clarify native platform discovery guidance.
 - Include the license notices for dependencies bundled into the Windows resource helper.
 
 ### Fixed
