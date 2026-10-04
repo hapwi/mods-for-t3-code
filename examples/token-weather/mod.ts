@@ -7,7 +7,6 @@ const WEATHER: readonly { below: number; icon: string; label: string; tone: Band
   { below: 90, icon: "☇", label: "Storm", tone: "magenta" },
   { below: Infinity, icon: "↯", label: "Compact soon", tone: "red" },
 ];
-const BARS = "▁▂▃▄▅▆▇█";
 const MAX_TURNS = 12;
 const MAX_THREADS = 40;
 type StoredTurn = [key: string, used: number];
@@ -37,17 +36,12 @@ export function line(snapshot: UsageSnapshot | null, turns: readonly number[]): 
   // No measurement yet (e.g. a blank conversation): render nothing.
   if (!snapshot) return [];
   const parts: BandPart[] = [];
-  let tone: BandTone = "muted";
   if (snapshot.maxTokens) {
     const percent = Math.floor(snapshot.usedTokens / snapshot.maxTokens * 100);
-    const forecast = weather(percent); tone = forecast.tone;
-    parts.push({ text: `${forecast.icon} ${forecast.label}`, tone }, { text: `  ${percent}%` }, { text: `  ${formatTokens(snapshot.usedTokens)} / ${formatTokens(snapshot.maxTokens)}`, tone: "muted" });
+    const forecast = weather(percent);
+    parts.push({ text: `${forecast.icon} ${forecast.label}`, tone: forecast.tone }, { text: `  ${percent}%` }, { text: `  ${formatTokens(snapshot.usedTokens)} / ${formatTokens(snapshot.maxTokens)}`, tone: "muted" });
   } else {
     parts.push({ text: "◌ Window unknown", tone: "muted" }, { text: `  ${formatTokens(snapshot.usedTokens)} used · window size unavailable`, tone: "muted" });
-  }
-  if (turns.length) {
-    const scale = snapshot.maxTokens ?? Math.max(...turns, 1);
-    parts.push({ text: `  ${turns.map((used) => BARS[Math.min(7, Math.round(used / scale * 7))] ?? "").join("")}`, tone });
   }
   // A delta needs two completed measurements; omit it until then.
   if (turns.length > 1) {

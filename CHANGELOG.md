@@ -5,6 +5,9 @@
 ### Added
 
 - Add macOS `prepare-update` recovery, available directly through curl with `--prepare-update`, to restore the verified vendor-signed app while T3 is closed, preserving private mod data and refusing to overwrite upstream replacements; native updater compatibility remains unverified.
+- Bundle an installable Context Usage mod with a native composer ring, clickable token inspector, segmented category bar, and explicit unavailable counts when T3 reports only totals; restore the original meter when disabled.
+- Add an original image-generated puzzle favicon for the project and its demo.
+
 - Add Edit for installed and built-in mods, drafting changes with the current source into the existing T3 chat and returning edited versions through mod review.
 - Install the Patcher changelog policy for ongoing changes and explicitly authorized releases.
 - Add the MIT-licensed Mods for T3 Code host, sidebar and Settings entries, live mod management, commands, panels, permission review, and isolated worker runtimes.
@@ -20,6 +23,8 @@
 ### Changed
 
 - Retain only the compiled runtime and maintenance files on new curl/PowerShell installations; remove the temporary source download after installation.
+- Limit the Built-in catalog to Context Usage and Token Weather; remove Token Weather’s text sparkline bar while keeping measured usage and completed-turn deltas.
+
 - Convert production code, example mods, the SDK and development scripts to strict TypeScript; ship the compiled CLI at `dist/cli.mjs` so end-user installation needs no compiler or npm dependencies.
 
 ### Fixed

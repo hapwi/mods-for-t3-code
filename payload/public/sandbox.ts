@@ -70,6 +70,7 @@ type Callback = () => unknown | Promise<unknown>;
       notify: (message: string) => call("notify", [message]),
       theme: Object.freeze({ set: (colors: Record<string, string>) => call("theme.set", [colors]), clear: () => call("theme.clear", []) }),
       band: Object.freeze({ set: (parts: Parameters<ModApi["band"]["set"]>[0]) => call("band.set", [parts]), clear: () => call("band.clear", []) }),
+      context: Object.freeze({ show: () => call("context.show", []), clear: () => call("context.clear", []) }),
       session: Object.freeze({ usage: () => call<import("../../sdk.d.ts").UsageSnapshot | null>("session.usage", []) }),
       route: Object.freeze({ get: () => call<string>("route.get", []) }),
       draft: Object.freeze({ read: () => call<string>("draft.read", []), insert: (text: string) => call<boolean>("draft.insert", [text]) }),

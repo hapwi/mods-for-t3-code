@@ -22,7 +22,7 @@ app.whenReady().then(async()=>{
   await w.webContents.executeJavaScript('('+start.toString()+')('+port+')');
   frame({_tag:'Chunk',values:[{event:{type:'node.updated',threadId:'thread-a',payload:{id:'root-a2',threadId:'thread-a',kind:'root_turn'}}},{event:{type:'provider-turn.updated',threadId:'thread-a',payload:{id:'a2',nodeId:'root-a2',status:'completed',tokenUsage:{usedTokens:134400,maxTokens:200000,updatedAt:new Date().toISOString()}}}}]});
   await w.webContents.executeJavaScript('('+finish.toString()+')('+port+')');
-  console.log('Electron integration passed: native CSP/preload, blank/first-turn weather, opaque band, real WebSocket/HTTP, chart/delta, native AI handoff, persistent review, installed/built-in editing, live toggle and cleanup.');
+  console.log('Electron integration passed: native CSP/preload, blank/first-turn weather, opaque band, real WebSocket/HTTP, delta, native AI handoff, persistent review, installed/built-in editing, live toggle and cleanup.');
   connection?.destroy();server.close();app.quit();
 }).catch(e=>{console.error(e.stack);connection?.destroy();server.close();app.exit(1)});
 setTimeout(()=>{console.error('Integration timeout');app.exit(1)},30000).unref();
@@ -58,7 +58,7 @@ async function finish(port){
   const band=()=>document.querySelector('[data-t3mods="bands"]')?.shadowRoot.querySelector('.band');
   await wait(()=>band()?.textContent.includes('▲ +98.3k last turn'),'real completion/delta');
   if(!band().textContent.includes('☂ Showers')||!band().textContent.includes('67%')||band().firstElementChild.dataset.tone!=='blue')throw Error('Forecast format');
-  const chart=[...band().children].find(x=>/^[▁▂▃▄▅▆▇█]+$/.test(x.textContent.trim()));if(chart?.textContent.trim().length!==2)throw Error('Chart');
+  const chart=[...band().children].find(x=>/^[▁▂▃▄▅▆▇█]+$/.test(x.textContent.trim()));if(chart)throw Error('Unexpected sparkline bar');
   location.hash='/local/thread-b';
   await fetch('http://127.0.0.1:'+port+'/api/orchestration/threads/thread-b/bounded');
   await wait(()=>band()?.textContent.includes('178k / 200k'),'HTTP report/hash navigation');
@@ -112,9 +112,9 @@ async function finish(port){
   await draftChange('Custom counter','Also show a short greeting');
   if(!editor.textContent.includes('Custom mod works')||!editor.textContent.includes('"custom-counter"')||!editor.textContent.includes('higher SemVer'))throw Error('Edit request lacks installed source or update contract');
   if(!document.querySelector('[data-t3mods="bands"]')?.shadowRoot.textContent.includes('Custom mod works'))throw Error('Editing stopped the installed mod');
-  window.__modsForT3Code.open('examples');editRow('[data-example="prompt-kit"]');
-  await draftChange('Prompt kit','Add a review prompt');
-  if(!editor.textContent.includes('not installed yet')||!editor.textContent.includes('api.commands.register'))throw Error('Uninstalled built-in is not editable');
+  window.__modsForT3Code.open('examples');editRow('[data-example="context-usage"]');
+  await draftChange('Context Usage','Use shorter labels');
+  if(!editor.textContent.includes('not installed yet')||!editor.textContent.includes('api.context.show'))throw Error('Uninstalled built-in is not editable');
   const original=window.__MODS_FOR_T3_OPTIONS__.examples.find(x=>x.manifest.id==='token-weather');
   await window.__modsForT3Code.importCandidate({...original,manifest:{...original.manifest,version:'1.1.0'},code:original.code+'\n// Installed customization'});
   [...sh.querySelectorAll('button')].find(x=>x.textContent==='Update mod').click();

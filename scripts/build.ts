@@ -3,7 +3,7 @@ import { readFile, mkdir, writeFile } from "node:fs/promises";
 
 await mkdir("dist", { recursive: true });
 const examples: import("../sdk.d.ts").ModBundle[] = [];
-for (const directory of ["focus-timer", "prompt-kit", "token-weather", "midnight-theme", "paper-theme"]) {
+for (const directory of ["context-usage", "token-weather"]) {
   const manifest = JSON.parse(await readFile(`examples/${directory}/mod.json`, "utf8")) as import("../sdk.d.ts").ModManifest;
   if (!manifest.entry) throw new Error(`Missing mod entry: ${directory}`);
   const bundled = await build({ entryPoints: [`examples/${directory}/${manifest.entry}`], bundle: true, format: "iife", globalName: "T3Mod", platform: "browser", target: "es2022", write: false });

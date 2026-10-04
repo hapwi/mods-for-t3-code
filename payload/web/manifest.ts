@@ -1,4 +1,4 @@
-import type { BandPart, BandTone, ModBundle, ModManifest, Permission, UsageSnapshot } from "../../sdk.d.ts";
+import type { BandPart, BandTone, ContextBreakdown, ModBundle, ModManifest, Permission, UsageSnapshot } from "../../sdk.d.ts";
 
 export const API_VERSION = 1;
 export const MAX_BUNDLE_BYTES = 1024 * 1024;
@@ -8,6 +8,7 @@ export const PERMISSIONS: { readonly [P in Permission]: string } = Object.freeze
   "ui.notify": "Show notifications labeled with the mod name",
   "ui.theme": "Apply a color theme across the T3 interface",
   "ui.band": "Show one line of styled text above the composer",
+  "ui.context": "Show a context usage ring and token breakdown above the composer",
   "session.usage": "Read measured context usage for the open thread",
   "app.route": "Read the current app route and follow navigation",
   "draft.read": "Read the current composer draft",
@@ -117,6 +118,7 @@ export function usageSnapshot(value: unknown): UsageSnapshot | null {
   const turnId = id(read(value, "turnId"));
   const maxTokens = read(value, "maxTokens");
   const measuredAt = read(value, "measuredAt");
+  const breakdown = contextBreakdown(read(value, "breakdown"), usedTokens);
   return {
     threadId,
     turnId,
@@ -124,5 +126,19 @@ export function usageSnapshot(value: unknown): UsageSnapshot | null {
     maxTokens: safeInt(maxTokens) && maxTokens > 0 ? maxTokens : null,
     measuredAt: typeof measuredAt === "number" && Number.isFinite(measuredAt) ? measuredAt : Date.now(),
     complete: read(value, "complete") === true && turnId !== null,
+    ...(breakdown ? { breakdown } : {}),
   };
+}
+
+export function contextBreakdown(value: unknown, usedTokens: number): ContextBreakdown | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const result: ContextBreakdown = {};
+  let total = 0;
+  for (const key of ["systemPrompt", "toolDefinitions", "rules", "skills", "mcpTools", "summarizedConversation", "conversation"] as const) {
+    const count = read(value, key);
+    if (count === undefined) continue;
+    if (!safeInt(count) || count < 0) return undefined;
+    result[key] = count; total += count;
+  }
+  return Object.keys(result).length && total <= usedTokens ? result : undefined;
 }

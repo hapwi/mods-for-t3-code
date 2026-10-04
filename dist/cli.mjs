@@ -14,6 +14,7 @@ var PERMISSIONS = Object.freeze({
   "ui.notify": "Show notifications labeled with the mod name",
   "ui.theme": "Apply a color theme across the T3 interface",
   "ui.band": "Show one line of styled text above the composer",
+  "ui.context": "Show a context usage ring and token breakdown above the composer",
   "session.usage": "Read measured context usage for the open thread",
   "app.route": "Read the current app route and follow navigation",
   "draft.read": "Read the current composer draft",
@@ -1502,7 +1503,7 @@ async function doctorMacApp(options = {}) {
 // src/windows-resources.ts
 import { readFile as readFile3, writeFile as writeFile3 } from "node:fs/promises";
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/FormatBase.js
+// node_modules/pe-library/dist/format/FormatBase.js
 var FormatBase = (
   /** @class */
   (function() {
@@ -1524,7 +1525,7 @@ var FormatBase = (
 );
 var FormatBase_default = FormatBase;
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/ArrayFormatBase.js
+// node_modules/pe-library/dist/format/ArrayFormatBase.js
 var __extends = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -1594,7 +1595,7 @@ if (typeof Symbol !== "undefined") {
 }
 var ArrayFormatBase_default = ArrayFormatBase;
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/ImageDataDirectoryArray.js
+// node_modules/pe-library/dist/format/ImageDataDirectoryArray.js
 var __extends2 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -1656,7 +1657,7 @@ var ImageDataDirectoryArray = (
 );
 var ImageDataDirectoryArray_default = ImageDataDirectoryArray;
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/ImageDirectoryEntry.js
+// node_modules/pe-library/dist/format/ImageDirectoryEntry.js
 var ImageDirectoryEntry = {
   Export: 0,
   Import: 1,
@@ -1681,7 +1682,7 @@ var ImageDirectoryEntry = {
 };
 var ImageDirectoryEntry_default = ImageDirectoryEntry;
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/util/functions.js
+// node_modules/pe-library/dist/util/functions.js
 function cloneObject(object) {
   var r = {};
   Object.keys(object).forEach(function(key) {
@@ -1910,7 +1911,7 @@ function stringToBinary(string) {
   }
 }
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/ImageDosHeader.js
+// node_modules/pe-library/dist/format/ImageDosHeader.js
 var __extends3 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -2125,7 +2126,7 @@ var ImageDosHeader = (
 );
 var ImageDosHeader_default = ImageDosHeader;
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/ImageFileHeader.js
+// node_modules/pe-library/dist/format/ImageFileHeader.js
 var __extends4 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -2234,7 +2235,7 @@ var ImageFileHeader = (
 );
 var ImageFileHeader_default = ImageFileHeader;
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/ImageOptionalHeader.js
+// node_modules/pe-library/dist/format/ImageOptionalHeader.js
 var __extends5 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -2574,7 +2575,7 @@ var ImageOptionalHeader = (
 );
 var ImageOptionalHeader_default = ImageOptionalHeader;
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/ImageOptionalHeader64.js
+// node_modules/pe-library/dist/format/ImageOptionalHeader64.js
 var __extends6 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -2974,7 +2975,7 @@ var ImageOptionalHeader64 = (
 );
 var ImageOptionalHeader64_default = ImageOptionalHeader64;
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/ImageNtHeaders.js
+// node_modules/pe-library/dist/format/ImageNtHeaders.js
 var __extends7 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -3076,7 +3077,7 @@ var ImageNtHeaders = (
 );
 var ImageNtHeaders_default = ImageNtHeaders;
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/ImageSectionHeaderArray.js
+// node_modules/pe-library/dist/format/ImageSectionHeaderArray.js
 var __extends8 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -3144,7 +3145,7 @@ var ImageSectionHeaderArray = (
 );
 var ImageSectionHeaderArray_default = ImageSectionHeaderArray;
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/util/generate.js
+// node_modules/pe-library/dist/util/generate.js
 var DOS_STUB_PROGRAM = new Uint8Array([
   14,
   31,
@@ -3270,7 +3271,7 @@ function makeEmptyNtExecutableBinary(is32Bit, isDLL) {
   return bin;
 }
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/NtExecutable.js
+// node_modules/pe-library/dist/NtExecutable.js
 var NtExecutable = (
   /** @class */
   (function() {
@@ -3595,7 +3596,7 @@ var NtExecutable = (
 );
 var NtExecutable_default = NtExecutable;
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/NtExecutableResource.js
+// node_modules/pe-library/dist/NtExecutableResource.js
 function removeDuplicates(a) {
   return a.reduce(function(p, c) {
     return p.indexOf(c) >= 0 ? p : p.concat(c);
@@ -4170,7 +4171,7 @@ var NtExecutableResource = (
 );
 var NtExecutableResource_default = NtExecutableResource;
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/util/functions.js
+// node_modules/resedit/dist/util/functions.js
 function cloneObject2(object) {
   var r = {};
   Object.keys(object).forEach(function(key) {
@@ -4220,7 +4221,7 @@ function readUint32WithLastOffset(view, offset, last) {
   return offset + 4 <= last ? view.getUint32(offset, true) : 0;
 }
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/data/IconItem.js
+// node_modules/resedit/dist/data/IconItem.js
 function calcMaskSize(width, height) {
   var actualWidthBytes = roundUp2(Math.abs(width), 32) / 8;
   return actualWidthBytes * Math.abs(height);
@@ -4374,7 +4375,7 @@ var IconItem = (
 );
 var IconItem_default = IconItem;
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/data/RawIconItem.js
+// node_modules/resedit/dist/data/RawIconItem.js
 var RawIconItem = (
   /** @class */
   (function() {
@@ -4404,7 +4405,7 @@ var RawIconItem = (
 );
 var RawIconItem_default = RawIconItem;
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/data/IconFile.js
+// node_modules/resedit/dist/data/IconFile.js
 function generateEntryBinary(icons) {
   var count = icons.length;
   if (count > 65535) {
@@ -4519,7 +4520,7 @@ var IconFile = (
   })()
 );
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/mui/MuiResourceInfo.js
+// node_modules/resedit/dist/mui/MuiResourceInfo.js
 function isValidMuiResourceEntry(resourceEntry) {
   var view = new DataView(resourceEntry.bin);
   if (view.getUint32(0, true) !== 4274912973) {
@@ -4846,7 +4847,7 @@ var MuiResourceInfo = (
   })()
 );
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/resource/VersionInfo.js
+// node_modules/resedit/dist/resource/VersionInfo.js
 function readStringToNullChar(view, offset, last) {
   var r = "";
   while (offset + 2 <= last) {
@@ -5491,7 +5492,7 @@ var VersionInfo = (
   })()
 );
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/resource/IconGroupEntry.js
+// node_modules/resedit/dist/resource/IconGroupEntry.js
 function generateEntryBinary2(icons) {
   var count = icons.length;
   if (count > 65535) {
@@ -5747,7 +5748,7 @@ var IconGroupEntry = (
   })()
 );
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/resource/StringTableItem.js
+// node_modules/resedit/dist/resource/StringTableItem.js
 var StringTableItem = (
   /** @class */
   (function() {
@@ -5820,7 +5821,7 @@ var StringTableItem = (
 );
 var StringTableItem_default = StringTableItem;
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/resource/StringTable.js
+// node_modules/resedit/dist/resource/StringTable.js
 var StringTable = (
   /** @class */
   (function() {
@@ -5928,7 +5929,7 @@ var StringTable = (
   })()
 );
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/DERObject.js
+// node_modules/resedit/dist/sign/data/DERObject.js
 var RawDERObject = (
   /** @class */
   (function() {
@@ -5942,7 +5943,7 @@ var RawDERObject = (
   })()
 );
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/derUtil.js
+// node_modules/resedit/dist/sign/data/derUtil.js
 function makeDERLength(length) {
   if (length < 128) {
     return [length];
@@ -5999,7 +6000,7 @@ function arrayToDERSet(items) {
   return [49].concat(makeDERLength(r.length)).concat(r);
 }
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/ObjectIdentifier.js
+// node_modules/resedit/dist/sign/data/ObjectIdentifier.js
 var ObjectIdentifier = (
   /** @class */
   (function() {
@@ -6043,7 +6044,7 @@ var ObjectIdentifier = (
 );
 var ObjectIdentifier_default = ObjectIdentifier;
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/KnownOids.js
+// node_modules/resedit/dist/sign/data/KnownOids.js
 var OID_SHA1_NO_SIGN = new ObjectIdentifier_default([1, 3, 14, 3, 2, 26]);
 var OID_SHA256_NO_SIGN = new ObjectIdentifier_default([2, 16, 840, 1, 101, 3, 4, 2, 1]);
 var OID_SHA384_NO_SIGN = new ObjectIdentifier_default([2, 16, 840, 1, 101, 3, 4, 2, 2]);
@@ -6067,7 +6068,7 @@ var OID_SPC_SP_OPUS_INFO_OBJID = new ObjectIdentifier_default([1, 3, 6, 1, 4, 1,
 var OID_SPC_INDIVIDUAL_SP_KEY_PURPOSE_OBJID = new ObjectIdentifier_default([1, 3, 6, 1, 4, 1, 311, 2, 1, 21]);
 var OID_RFC3161_COUNTER_SIGNATURE = new ObjectIdentifier_default([1, 3, 6, 1, 4, 1, 311, 3, 3, 1]);
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/AlgorithmIdentifier.js
+// node_modules/resedit/dist/sign/data/AlgorithmIdentifier.js
 var AlgorithmIdentifier = (
   /** @class */
   (function() {
@@ -6085,7 +6086,7 @@ var AlgorithmIdentifier = (
   })()
 );
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/Attribute.js
+// node_modules/resedit/dist/sign/data/Attribute.js
 var Attribute = (
   /** @class */
   (function() {
@@ -6100,7 +6101,7 @@ var Attribute = (
   })()
 );
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/ContentInfo.js
+// node_modules/resedit/dist/sign/data/ContentInfo.js
 var ContentInfo = (
   /** @class */
   (function() {
@@ -6116,7 +6117,7 @@ var ContentInfo = (
 );
 var ContentInfo_default = ContentInfo;
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/CertificateDataRoot.js
+// node_modules/resedit/dist/sign/data/CertificateDataRoot.js
 var __extends9 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -6147,7 +6148,7 @@ var CertificateDataRoot = (
   })(ContentInfo_default)
 );
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/DigestInfo.js
+// node_modules/resedit/dist/sign/data/DigestInfo.js
 var DigestInfo = (
   /** @class */
   (function() {
@@ -6170,7 +6171,7 @@ var DigestInfo = (
   })()
 );
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/IssuerAndSerialNumber.js
+// node_modules/resedit/dist/sign/data/IssuerAndSerialNumber.js
 var IssuerAndSerialNumber = (
   /** @class */
   (function() {
@@ -6185,7 +6186,7 @@ var IssuerAndSerialNumber = (
   })()
 );
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/SignedData.js
+// node_modules/resedit/dist/sign/data/SignedData.js
 var SignedData = (
   /** @class */
   (function() {
@@ -6214,7 +6215,7 @@ var SignedData = (
   })()
 );
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/SignerInfo.js
+// node_modules/resedit/dist/sign/data/SignerInfo.js
 var SignerInfo = (
   /** @class */
   (function() {
@@ -6246,7 +6247,7 @@ var SignerInfo = (
   })()
 );
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/SpcIndirectDataContent.js
+// node_modules/resedit/dist/sign/data/SpcIndirectDataContent.js
 var __extends10 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -6307,7 +6308,7 @@ var SpcIndirectDataContentInfo = (
   })(ContentInfo_default)
 );
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/SpcLink.js
+// node_modules/resedit/dist/sign/data/SpcLink.js
 var __extends11 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -6369,7 +6370,7 @@ var SpcLinkFile = (
   })(SpcLink)
 );
 
-// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/SpcPeImageData.js
+// node_modules/resedit/dist/sign/data/SpcPeImageData.js
 var __extends12 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {

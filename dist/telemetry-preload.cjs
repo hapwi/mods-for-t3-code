@@ -81,7 +81,7 @@ function installTelemetry() {
   function emit(name, value) {
     for (const listener of listeners) {
       try {
-        listener({ name, value: { ...value } });
+        listener({ name, value: structuredClone(value) });
       } catch {
       }
     }
@@ -112,9 +112,24 @@ function installTelemetry() {
       measuredAt: Number.isFinite(measuredAt) ? measuredAt : Date.now(),
       complete: Boolean(turnId && completed.get(threadId) === turnId)
     };
+    const raw = object(payload.breakdown);
+    const breakdown = {};
+    let total = 0;
+    let valid = true;
+    for (const key of ["systemPrompt", "toolDefinitions", "rules", "skills", "mcpTools", "summarizedConversation", "conversation"]) {
+      const count = raw[key];
+      if (count === void 0) continue;
+      if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) {
+        valid = false;
+        break;
+      }
+      breakdown[key] = count;
+      total += count;
+    }
+    if (valid && Object.keys(breakdown).length && total <= value.usedTokens) value.breakdown = breakdown;
     const previous = snapshots.get(threadId);
     if (previous && value.measuredAt < previous.measuredAt) return;
-    if (previous && previous.turnId === value.turnId && previous.usedTokens === value.usedTokens && previous.maxTokens === value.maxTokens && previous.complete === value.complete) return;
+    if (previous && previous.turnId === value.turnId && previous.usedTokens === value.usedTokens && previous.maxTokens === value.maxTokens && previous.complete === value.complete && JSON.stringify(previous.breakdown) === JSON.stringify(value.breakdown)) return;
     snapshots.delete(threadId);
     snapshots.set(threadId, value);
     if (snapshots.size > 100) snapshots.delete(firstKey(snapshots));
@@ -315,7 +330,7 @@ function installTelemetry() {
         return null;
       }
       const value = snapshots.get(threadId);
-      return value ? { ...value } : null;
+      return value ? structuredClone(value) : null;
     },
     subscribe(listener) {
       if (typeof listener !== "function") throw new TypeError("Expected a listener.");

@@ -61,7 +61,7 @@ function installTelemetry() {
     for (const artifact of found) for (const listener of artifactListeners) { try { listener(structuredClone(artifact)); } catch {} }
   }
   function emit(name: TelemetryEvent["name"], value: UsageSnapshot) {
-    for (const listener of listeners) { try { listener({ name, value: { ...value } }); } catch {} }
+    for (const listener of listeners) { try { listener({ name, value: structuredClone(value) }); } catch {} }
   }
   function complete(threadId: unknown, turnId: unknown) {
     if (!id(threadId) || !id(turnId)) return;
@@ -86,9 +86,21 @@ function installTelemetry() {
       measuredAt: Number.isFinite(measuredAt) ? measuredAt : Date.now(),
       complete: Boolean(turnId && completed.get(threadId) === turnId),
     };
+    // Only bounded numeric categories cross the bridge. Missing counts stay absent.
+    const raw = object(payload.breakdown);
+    const breakdown: NonNullable<UsageSnapshot["breakdown"]> = {};
+    let total = 0;
+    let valid = true;
+    for (const key of ["systemPrompt", "toolDefinitions", "rules", "skills", "mcpTools", "summarizedConversation", "conversation"] as const) {
+      const count = raw[key];
+      if (count === undefined) continue;
+      if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) { valid = false; break; }
+      breakdown[key] = count; total += count;
+    }
+    if (valid && Object.keys(breakdown).length && total <= value.usedTokens) value.breakdown = breakdown;
     const previous = snapshots.get(threadId);
     if (previous && value.measuredAt < previous.measuredAt) return;
-    if (previous && previous.turnId === value.turnId && previous.usedTokens === value.usedTokens && previous.maxTokens === value.maxTokens && previous.complete === value.complete) return;
+    if (previous && previous.turnId === value.turnId && previous.usedTokens === value.usedTokens && previous.maxTokens === value.maxTokens && previous.complete === value.complete && JSON.stringify(previous.breakdown) === JSON.stringify(value.breakdown)) return;
     snapshots.delete(threadId); snapshots.set(threadId, value);
     if (snapshots.size > 100) snapshots.delete(firstKey(snapshots));
     emit("session.usage", value);
@@ -261,7 +273,7 @@ function installTelemetry() {
       const segments = String(pathname).split("/").filter(Boolean);
       if (segments.length < 1 || ["settings", "draft"].includes(segments[0])) return null;
       let threadId; try { threadId = decodeURIComponent(segments.at(-1)!); } catch { return null; }
-      const value = snapshots.get(threadId); return value ? { ...value } : null;
+      const value = snapshots.get(threadId); return value ? structuredClone(value) : null;
     },
     subscribe(listener: (event: TelemetryEvent) => void) {
       if (typeof listener !== "function") throw new TypeError("Expected a listener.");

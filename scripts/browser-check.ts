@@ -1,10 +1,12 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+const capturePath = process.env.CONTEXT_USAGE_SCREENSHOT;
+const contextUsage = process.argv.includes("--context-usage");
 const profile = await mkdtemp(path.join(tmpdir(), "mods-for-t3-browser-"));
-const browser = spawn(process.env.CHROMIUM || "chromium", ["--headless", "--disable-gpu", "--no-first-run", `--user-data-dir=${profile}`, "--remote-debugging-port=0", "http://127.0.0.1:4318/?smoke=1"], { stdio: "ignore" });
+const browser = spawn(process.env.CHROMIUM || "chromium", ["--headless", "--disable-gpu", "--no-first-run", `--user-data-dir=${profile}`, "--remote-debugging-port=0", `http://127.0.0.1:4318/?${contextUsage ? "context-check" : "smoke"}=1${contextUsage && capturePath ? "&capture=1" : ""}`], { stdio: "ignore" });
 let socket: WebSocket | undefined;
 let sequence = 0;
 interface RpcResult {result: {value: string}}
@@ -38,6 +40,11 @@ try {
   for (;;) {
     const result = await rpc("Runtime.evaluate", { expression: 'JSON.stringify({status:document.querySelector("#smoke-result")?.dataset.status,text:document.querySelector("#smoke-result")?.textContent})', returnByValue: true });
     const value = JSON.parse(result.result.value);
+    if (value.status === "capture" && capturePath) {
+      const capture = await rpc("Page.captureScreenshot", { format: "png" }) as unknown as { data: string };
+      await writeFile(capturePath, Buffer.from(capture.data, "base64"));
+      await rpc("Runtime.evaluate", { expression: "window.__contextUsageContinue = true" });
+    }
     if (value.status === "failed") throw new Error(value.text);
     if (value.status === "passed") { console.log(value.text); break; }
     if (Date.now() > deadline) throw new Error(`Browser test did not complete: ${value.text || "no output"}`);

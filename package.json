@@ -25,7 +25,7 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "demo": "node scripts/demo.ts",
-    "pack:examples": "node dist/cli.mjs pack examples/focus-timer --out demo/focus-timer.t3mod && node dist/cli.mjs pack examples/prompt-kit --out demo/prompt-kit.t3mod",
+    "pack:examples": "node dist/cli.mjs pack examples/context-usage --out demo/context-usage.t3mod && node dist/cli.mjs pack examples/token-weather --out demo/token-weather.t3mod",
     "build": "node scripts/build.ts",
     "typecheck": "tsc --noEmit"
   },

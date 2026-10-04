@@ -8,6 +8,7 @@
     "ui.notify": "Show notifications labeled with the mod name",
     "ui.theme": "Apply a color theme across the T3 interface",
     "ui.band": "Show one line of styled text above the composer",
+    "ui.context": "Show a context usage ring and token breakdown above the composer",
     "session.usage": "Read measured context usage for the open thread",
     "app.route": "Read the current app route and follow navigation",
     "draft.read": "Read the current composer draft",
@@ -101,14 +102,29 @@
     const turnId = id(read(value, "turnId"));
     const maxTokens = read(value, "maxTokens");
     const measuredAt = read(value, "measuredAt");
+    const breakdown = contextBreakdown(read(value, "breakdown"), usedTokens);
     return {
       threadId,
       turnId,
       usedTokens,
       maxTokens: safeInt(maxTokens) && maxTokens > 0 ? maxTokens : null,
       measuredAt: typeof measuredAt === "number" && Number.isFinite(measuredAt) ? measuredAt : Date.now(),
-      complete: read(value, "complete") === true && turnId !== null
+      complete: read(value, "complete") === true && turnId !== null,
+      ...breakdown ? { breakdown } : {}
     };
+  }
+  function contextBreakdown(value, usedTokens) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
+    const result = {};
+    let total = 0;
+    for (const key of ["systemPrompt", "toolDefinitions", "rules", "skills", "mcpTools", "summarizedConversation", "conversation"]) {
+      const count = read(value, key);
+      if (count === void 0) continue;
+      if (!safeInt(count) || count < 0) return void 0;
+      result[key] = count;
+      total += count;
+    }
+    return Object.keys(result).length && total <= usedTokens ? result : void 0;
   }
 
   // payload/web/database.ts
@@ -187,7 +203,7 @@
   }
 
   // payload/web/runtime.ts
-  var MOD_METHODS = /* @__PURE__ */ new Set(["events.subscribe", "commands.register", "panels.set", "panels.clear", "notify", "theme.set", "theme.clear", "band.set", "band.clear", "session.usage", "route.get", "draft.read", "draft.insert", "storage.get", "storage.set", "log"]);
+  var MOD_METHODS = /* @__PURE__ */ new Set(["events.subscribe", "commands.register", "panels.set", "panels.clear", "notify", "theme.set", "theme.clear", "band.set", "band.clear", "context.show", "context.clear", "session.usage", "route.get", "draft.read", "draft.insert", "storage.get", "storage.set", "log"]);
   function isRecord(value) {
     return typeof value === "object" && value !== null;
   }
@@ -351,6 +367,15 @@
           require2("ui.band");
           this.hooks.band(this, null);
           return;
+        case "context.show":
+          require2("ui.context");
+          require2("session.usage");
+          this.hooks.context(this, true);
+          return;
+        case "context.clear":
+          require2("ui.context");
+          this.hooks.context(this, false);
+          return;
         case "session.usage":
           require2("session.usage");
           return this.hooks.usage();
@@ -449,11 +474,74 @@
     if (!event.defaultPrevented) throw new Error("This T3 editor does not support the paste adapter. Copy the text and paste it manually.");
   }
   var FLOATING = { position: "absolute", left: "0", width: "auto", maxWidth: "none", margin: "0", zIndex: "30", pointerEvents: "none" };
-  function dockAboveComposer(element) {
+  function dockContextControl(element2) {
+    const fallback = dockAboveComposer(element2);
+    let wanted = false;
+    let meter = null;
+    let original;
+    let frame;
+    const initialStyle = element2.style.cssText;
+    let inNativeSlot = false;
+    function restore() {
+      if (meter && original) {
+        if (original.value) meter.style.setProperty("display", original.value, original.priority);
+        else meter.style.removeProperty("display");
+      }
+      meter = null;
+      original = void 0;
+    }
+    function place() {
+      frame = void 0;
+      if (!wanted) {
+        restore();
+        inNativeSlot = false;
+        fallback.show(false);
+        return;
+      }
+      const editor = composer();
+      const form = editor?.closest("[data-chat-composer-form]") ?? editor?.closest("form");
+      const next = form?.querySelector('button[aria-label^="Context window " i]') ?? null;
+      if (next !== meter) {
+        restore();
+        meter = next;
+        if (meter) original = { value: meter.style.getPropertyValue("display"), priority: meter.style.getPropertyPriority("display") };
+      }
+      if (meter?.parentElement) {
+        if (!inNativeSlot) {
+          fallback.show(false);
+          element2.style.cssText = initialStyle;
+          inNativeSlot = true;
+        }
+        if (element2.nextSibling !== meter) meter.before(element2);
+        meter.style.setProperty("display", "none", "important");
+      } else {
+        inNativeSlot = false;
+        fallback.show(true);
+      }
+    }
+    function schedule() {
+      if (frame === void 0) frame = requestAnimationFrame(place);
+    }
+    const observer = new MutationObserver(schedule);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return {
+      show(value) {
+        wanted = value;
+        place();
+      },
+      dispose() {
+        observer.disconnect();
+        if (frame !== void 0) cancelAnimationFrame(frame);
+        restore();
+        fallback.dispose();
+      }
+    };
+  }
+  function dockAboveComposer(element2) {
     let wanted = false;
     let frame;
     let observed = [];
-    const inFlow = element.style.cssText;
+    const inFlow = element2.style.cssText;
     const resizeObserver = new ResizeObserver(() => schedule());
     function schedule() {
       if (wanted && frame === void 0) frame = requestAnimationFrame(place);
@@ -472,33 +560,33 @@
       let reserve = 0;
       if (parts.some((rect) => rect.width > box.width / 2 || rect.left < box.left + box.width / 2)) lift = Math.max(0, box.top - Math.min(...parts.map((rect) => rect.top)));
       else if (parts.length) reserve = Math.max(0, box.right - Math.min(...parts.map((rect) => rect.left)) + 8);
-      Object.assign(element.style, FLOATING, { right: `${reserve}px`, bottom: `calc(100% + ${lift}px)` });
+      Object.assign(element2.style, FLOATING, { right: `${reserve}px`, bottom: `calc(100% + ${lift}px)` });
     }
     function place() {
       frame = void 0;
       const editor = wanted ? composer() : null;
       if (!editor) {
         watch();
-        element.remove();
+        element2.remove();
         return;
       }
       const main = editor.closest("[data-chat-composer-main-surface]");
       const form = editor.closest("[data-chat-composer-form]") ?? editor.closest("form");
       if (main?.parentElement) {
-        if (element.nextElementSibling !== main) main.before(element);
+        if (element2.nextElementSibling !== main) main.before(element2);
         const dock = form ? [...form.children].find((child) => child instanceof HTMLElement && child.matches('[data-slot="composer-banner-attachment"]')) ?? null : null;
         watch(main, dock);
         float(main, dock);
         return;
       }
       watch();
-      element.style.cssText = inFlow;
+      element2.style.cssText = inFlow;
       const anchor = form ?? editor;
       if (!anchor.parentElement) {
-        element.remove();
+        element2.remove();
         return;
       }
-      if (element.nextElementSibling !== anchor) anchor.before(element);
+      if (element2.nextElementSibling !== anchor) anchor.before(element2);
     }
     const observer = new MutationObserver(schedule);
     observer.observe(document.body, { subtree: true, childList: true });
@@ -512,7 +600,7 @@
         observer.disconnect();
         resizeObserver.disconnect();
         if (frame !== void 0) cancelAnimationFrame(frame);
-        element.remove();
+        element2.remove();
       }
     };
   }
@@ -703,6 +791,7 @@ The t3mod-code block is complete JavaScript, runs in an isolated browser worker,
 - ui.notify: await api.notify("message").
 - ui.theme: await api.theme.set({background:"#17212f",foreground:"#edf2f8",...}); api.theme.clear(). Supported tokens: background/foreground, card/card-foreground, popover/popover-foreground, primary/primary-foreground, secondary/secondary-foreground, muted/muted-foreground, accent/accent-foreground, sidebar/sidebar-foreground, sidebar-primary/sidebar-primary-foreground, sidebar-accent/sidebar-accent-foreground, border,input,ring,sidebar-border,sidebar-ring. Always provide both tokens in a pair, including background and foreground. Only #RRGGBB colors; text pairs need 4.5:1 contrast. No arbitrary CSS. Turning the mod off restores the normal theme.
 - ui.band: await api.band.set([{text:"\u2600 Clear",tone:"yellow"},{text:"  20%"}]); api.band.clear(). One line of plain text above the composer, 1\u201316 parts, up to 160 characters each and 300 in total. Tones: default, muted, yellow, cyan, blue, magenta, red. No HTML, markdown, or newlines.
+- ui.context + session.usage: await api.context.show(); api.context.clear(). Shows a host-rendered usage ring in the native composer meter slot (or above the composer on older builds). Clicking opens the measured context breakdown. Updates automatically; absent category counts are labeled unavailable. No access to conversation text.
 - session.usage: await api.session.usage() returns {threadId,turnId,usedTokens,maxTokens,measuredAt,complete} for the open thread, or null. api.on("session.usage", snapshot => {}) fires on new measurements and on navigation (snapshot may be null). api.on("turn.complete", snapshot => {}) fires when a turn completes and can repeat for the same turnId with a later measurement, so replace rather than append. maxTokens can be null: show that the window is unknown and never assume a size. These are measurements only; no prompt or response text.
 - app.route: await api.route.get(); api.on("app.route", path => {}).
 - draft.read: await api.draft.read(); api.on("draft.change", text => {}). Drafts may contain sensitive text.
@@ -779,6 +868,8 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
 .panel-tray[data-docked]{position:relative;inset:auto;width:100%;max-height:30vh;box-shadow:none;z-index:auto;margin-bottom:8px;background:var(--mf-card)}
 @media(max-width:600px){header{padding:16px 16px 10px}.tabs{margin-inline:16px;max-width:calc(100% - 32px)}.content{padding:12px 16px 16px}.row{flex-direction:column;align-items:stretch;gap:8px}.row-actions{justify-content:flex-start;flex-wrap:wrap}.panel-tray{width:280px}}
 .band-stack{width:fit-content;max-width:100%;padding:2px 16px 6px;border-top-right-radius:var(--mf-control-radius);background:var(--mf-bg);font-size:12px;line-height:16px;color:var(--mf-muted)}.band{white-space:pre;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}.band [data-tone=muted]{color:var(--mf-muted)}.band [data-tone=yellow]{color:var(--color-yellow-500,#d4a72c)}.band [data-tone=cyan]{color:var(--color-cyan-500,#22a8bd)}.band [data-tone=blue]{color:var(--info,var(--color-blue-500,#3b82f6))}.band [data-tone=magenta]{color:var(--color-fuchsia-500,#c85bd8)}.band [data-tone=red]{color:var(--destructive,#e5534b)}
+.context-widget{display:flex;align-items:center;gap:3px;pointer-events:auto}.context-widget[hidden]{display:none}.context-trigger{width:28px;height:28px;padding:4px}.context-trigger svg{width:20px;height:20px;transform:rotate(-90deg)}.context-ring-track{stroke:color-mix(in srgb,var(--mf-muted) 24%,transparent)}.context-ring-fill{stroke:color-mix(in srgb,var(--mf-muted) 72%,transparent);stroke-linecap:round;transition:stroke-dashoffset .5s ease-out,stroke .5s ease-out}.context-widget[data-level=high] .context-ring-fill{stroke:var(--color-error,var(--mf-danger))}.context-widget[data-unknown=true] .context-ring-track{stroke-dasharray:3 3}.context-percent{font-size:11px;color:var(--mf-muted);font-variant-numeric:tabular-nums}
+.context-popup{position:fixed;inset:auto;margin:0;width:min(430px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;padding:0;border:1px solid var(--mf-border);border-radius:calc(var(--mf-radius) + 4px);background:var(--mf-popover);color:var(--mf-fg);box-shadow:0 8px 24px #00000029;pointer-events:auto;white-space:normal}.context-header{padding:12px 16px 4px;align-items:center;gap:12px}.context-header h2{font-size:13px;font-weight:500;color:var(--mf-muted)}.context-content{padding:8px 16px 16px;display:flex;flex-direction:column;gap:12px}.context-summary{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--mf-muted);font-variant-numeric:tabular-nums}.context-bar{display:flex;gap:1px;height:6px;flex:none;overflow:hidden;border-radius:999px;background:color-mix(in srgb,var(--mf-muted) 24%,transparent)}.context-segment{height:100%;flex-shrink:1;border-radius:2px}.context-breakdown{display:flex;flex-direction:column;gap:10px;margin:2px 0 0;font-size:12px}.context-category{display:flex;align-items:center;justify-content:space-between;gap:16px}.context-category dt{display:flex;align-items:center;gap:8px;min-width:0}.context-category dd{margin:0;color:var(--mf-muted);font-variant-numeric:tabular-nums;flex:none}.context-category .context-unavailable{font-size:11px;color:color-mix(in srgb,var(--mf-muted) 75%,transparent)}.context-swatch{width:10px;height:10px;flex:none;border-radius:2px}.context-note{font-size:11px;line-height:1.5;color:var(--mf-muted)}@media(prefers-reduced-motion:reduce){.context-ring-fill{transition:none}}
 `;
 
   // payload/web/themes.ts
@@ -977,35 +1068,184 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
       if (colors) {
         for (const node2 of document.querySelectorAll(SIDEBAR_SELECTOR)) live.add(node2);
       }
-      for (const [element, saved] of this.sidebarInline) {
-        if (live.has(element)) continue;
-        restoreInline(element.style, saved);
-        this.sidebarInline.delete(element);
+      for (const [element2, saved] of this.sidebarInline) {
+        if (live.has(element2)) continue;
+        restoreInline(element2.style, saved);
+        this.sidebarInline.delete(element2);
       }
       if (!colors) return;
-      for (const element of live) {
-        const saved = this.sidebarInline.get(element) ?? /* @__PURE__ */ new Map();
-        if (this.sidebarInline.has(element)) restoreInline(element.style, saved);
-        this.sidebarInline.set(element, saved);
-        applyInline(element.style, saved, colors);
+      for (const element2 of live) {
+        const saved = this.sidebarInline.get(element2) ?? /* @__PURE__ */ new Map();
+        if (this.sidebarInline.has(element2)) restoreInline(element2.style, saved);
+        this.sidebarInline.set(element2, saved);
+        applyInline(element2.style, saved, colors);
       }
+    }
+  };
+
+  // payload/web/context-usage.ts
+  var CATEGORIES = [
+    ["systemPrompt", "System prompt", "#999999"],
+    ["toolDefinitions", "Tool definitions", "#9885ed"],
+    ["rules", "Rules", "#399f6b"],
+    ["skills", "Skills", "#efb65e"],
+    ["mcpTools", "MCP & dynamic tools", "#b28fab"],
+    ["summarizedConversation", "Summarized conversation", "#f26483"],
+    ["conversation", "Conversation", "#dc8079"]
+  ];
+  function element(tag, className, text) {
+    const result = document.createElement(tag);
+    result.className = className;
+    if (text !== void 0) result.textContent = text;
+    return result;
+  }
+  function formatContextTokens(value) {
+    return value < 1e3 ? String(value) : value < 1e6 ? `${(value / 1e3).toFixed(1).replace(/\.0$/, "")}K` : `${(value / 1e6).toFixed(2).replace(/\.?0+$/, "")}M`;
+  }
+  var sequence = 0;
+  var ContextUsageView = class {
+    root = element("div", "context-widget");
+    trigger = element("button", "context-trigger ghost icon");
+    popup = element("div", "context-popup");
+    content = element("div", "context-content");
+    label = element("span", "context-percent");
+    arc;
+    threadId;
+    constructor() {
+      this.root.hidden = true;
+      this.trigger.type = "button";
+      this.trigger.setAttribute("aria-haspopup", "dialog");
+      this.trigger.setAttribute("aria-expanded", "false");
+      this.popup.id = `t3mods-context-${++sequence}`;
+      this.popup.popover = "auto";
+      this.popup.role = "dialog";
+      this.popup.setAttribute("aria-label", "Context Usage");
+      this.trigger.setAttribute("aria-controls", this.popup.id);
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", "0 0 24 24");
+      svg.setAttribute("aria-hidden", "true");
+      for (const className of ["context-ring-track", "context-ring-fill"]) {
+        const circle = document.createElementNS(svg.namespaceURI, "circle");
+        for (const [key, value] of Object.entries({ cx: "12", cy: "12", r: "9.75", fill: "none", "stroke-width": "3", class: className })) circle.setAttribute(key, value);
+        svg.append(circle);
+      }
+      this.arc = svg.lastElementChild;
+      this.arc.setAttribute("pathLength", "100");
+      this.arc.setAttribute("stroke-dasharray", "100");
+      this.trigger.append(svg);
+      const close = element("button", "ghost icon xs", "\xD7");
+      close.type = "button";
+      close.setAttribute("aria-label", "Close context usage");
+      close.onclick = () => {
+        this.popup.hidePopover();
+        this.trigger.focus();
+      };
+      this.popup.append(element("header", "context-header"));
+      this.popup.firstElementChild.append(element("h2", "", "Context Usage"), close);
+      this.popup.append(this.content);
+      this.trigger.onclick = () => {
+        if (this.popup.matches(":popover-open")) this.popup.hidePopover();
+        else {
+          this.popup.showPopover();
+          this.position();
+          close.focus();
+        }
+      };
+      this.popup.addEventListener("toggle", () => {
+        this.trigger.setAttribute("aria-expanded", String(this.popup.matches(":popover-open")));
+      });
+      this.popup.addEventListener("keydown", (event) => event.stopPropagation());
+      this.root.append(this.trigger, this.label, this.popup);
+      window.addEventListener("resize", this.position);
+      window.addEventListener("scroll", this.position, true);
+    }
+    position = () => {
+      if (!this.popup.matches(":popover-open")) return;
+      const anchor = this.trigger.getBoundingClientRect();
+      const box = this.popup.getBoundingClientRect();
+      const left = Math.max(12, Math.min(anchor.right - box.width, window.innerWidth - box.width - 12));
+      const top = Math.max(12, Math.min(anchor.top - box.height - 8, window.innerHeight - box.height - 12));
+      this.popup.style.left = `${left}px`;
+      this.popup.style.top = `${top}px`;
+    };
+    update(snapshot) {
+      if (this.threadId !== snapshot?.threadId || !snapshot) {
+        if (this.popup.matches(":popover-open")) this.popup.hidePopover();
+      }
+      this.threadId = snapshot?.threadId;
+      this.root.hidden = !snapshot;
+      if (!snapshot) return;
+      const { usedTokens, maxTokens, breakdown } = snapshot;
+      const percent = maxTokens ? Math.min(100, usedTokens / maxTokens * 100) : null;
+      const percentText = percent === null ? "Window unknown" : `${Math.round(percent)}%`;
+      this.label.textContent = percent === null ? "" : percentText;
+      const accessible = percent === null ? `Context usage: ${formatContextTokens(usedTokens)} tokens, window size unavailable` : `Context window ${percentText} used`;
+      this.trigger.title = `${accessible}. Click for breakdown.`;
+      this.trigger.setAttribute("aria-label", `${accessible}. Show context usage`);
+      this.root.dataset.level = percent !== null && percent > 90 ? "high" : "normal";
+      this.root.dataset.unknown = String(percent === null);
+      this.arc.setAttribute("stroke-dashoffset", String(100 - (percent ?? 0)));
+      const summary = element("div", "context-summary");
+      summary.append(element("span", "", percent === null ? "Window size unavailable" : `${percentText} Full`), element("span", "", `${formatContextTokens(usedTokens)}${maxTokens ? ` / ${formatContextTokens(maxTokens)}` : ""} Tokens`));
+      const bar = element("div", "context-bar");
+      bar.role = "progressbar";
+      bar.setAttribute("aria-label", "Context window usage");
+      bar.setAttribute("aria-valuemin", "0");
+      bar.setAttribute("aria-valuemax", "100");
+      if (percent !== null) bar.setAttribute("aria-valuenow", String(Math.round(percent)));
+      bar.setAttribute("aria-valuetext", accessible);
+      const list = element("dl", "context-breakdown");
+      let classified = 0;
+      const segment = (tokens, color) => {
+        if (!tokens) return;
+        const part = element("span", "context-segment");
+        part.style.backgroundColor = color;
+        part.style.width = `${tokens / Math.max(maxTokens ?? usedTokens, usedTokens, 1) * 100}%`;
+        bar.append(part);
+      };
+      const row2 = (name, count, color) => {
+        const item = element("div", "context-category");
+        const title = element("dt", "");
+        const swatch = element("span", "context-swatch");
+        swatch.style.backgroundColor = color;
+        title.append(swatch, document.createTextNode(name));
+        const total = element("dd", count === void 0 ? "context-unavailable" : "", count === void 0 ? "Unavailable" : formatContextTokens(count));
+        item.append(title, total);
+        list.append(item);
+        if (count !== void 0) {
+          classified += count;
+          segment(count, color);
+        }
+      };
+      for (const [key, name, color] of CATEGORIES) row2(name, breakdown?.[key], color);
+      const remainder = usedTokens - classified;
+      if (remainder > 0 || !breakdown) row2("Unclassified context", remainder, "#70869d");
+      const note2 = element("p", "context-note", !breakdown ? "T3 reports the total context usage, but does not provide these category counts. Unavailable counts are not zero." : "Category counts are reported by T3. Any tokens without a category appear as unclassified context.");
+      this.content.replaceChildren(summary, bar, list, note2);
+      this.position();
+    }
+    dispose() {
+      if (this.popup.matches(":popover-open")) this.popup.hidePopover();
+      window.removeEventListener("resize", this.position);
+      window.removeEventListener("scroll", this.position, true);
+      this.root.remove();
     }
   };
 
   // payload/web/host.ts
   function node(tag, attributes = {}, children = []) {
-    const element = document.createElement(tag);
+    const element2 = document.createElement(tag);
     for (const [key, value] of Object.entries(attributes)) {
       if (value == null) continue;
-      if (key === "class") element.className = String(value);
-      else if (key === "text") element.textContent = String(value);
-      else if (key === "style") element.setAttribute("style", String(value));
-      else if (key.startsWith("on") && typeof value === "function") element.addEventListener(key.slice(2), value);
-      else if (key in element) Reflect.set(element, key, value);
-      else element.setAttribute(key, String(value));
+      if (key === "class") element2.className = String(value);
+      else if (key === "text") element2.textContent = String(value);
+      else if (key === "style") element2.setAttribute("style", String(value));
+      else if (key.startsWith("on") && typeof value === "function") element2.addEventListener(key.slice(2), value);
+      else if (key in element2) Reflect.set(element2, key, value);
+      else element2.setAttribute(key, String(value));
     }
-    if (children.length) element.append(...children);
-    return element;
+    if (children.length) element2.append(...children);
+    return element2;
   }
   var button = (text, onclick, className = "") => node("button", { text, onclick, class: className, type: "button" });
   var toggle = (checked, label, disabled = false) => node("input", { type: "checkbox", role: "switch", class: "switch", checked, disabled, "aria-label": label });
@@ -1118,6 +1358,11 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
     const bandStack = node("div", { class: "band-stack" });
     bandShadow.append(node("style", { text: style }), bandStack);
     const bandDock = dockAboveComposer(bandRoot);
+    const contextRoot = node("div", { "data-t3mods": "context", style: "display:flex;align-items:center;flex:none" });
+    const contextShadow = contextRoot.attachShadow({ mode: "open" });
+    contextShadow.append(node("style", { text: style }));
+    const contextDock = dockContextControl(contextRoot);
+    const contextViews = /* @__PURE__ */ new Map();
     let records = [];
     const runtimes = /* @__PURE__ */ new Map();
     const readyRuntimes = /* @__PURE__ */ new WeakSet();
@@ -1335,6 +1580,11 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
       bandStack.replaceChildren(...rows);
       bandDock.show(rows.length > 0);
     }
+    function renderContext() {
+      const usage = currentUsage();
+      for (const view of contextViews.values()) view.update(usage);
+      contextDock.show(contextViews.size > 0 && usage !== null);
+    }
     function currentUsage() {
       try {
         return usageSnapshot(telemetry?.get(routePath()));
@@ -1351,6 +1601,7 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
           if (event.name !== "session.usage" && event.name !== "turn.complete") return;
           const value = usageSnapshot(event.value);
           if (!value || currentUsage()?.threadId !== value.threadId) return;
+          renderContext();
           for (const runtime of runtimes.values()) runtime.emit(event.name, value);
         });
       } catch {
@@ -1423,6 +1674,18 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
           else bands.delete(record.manifest.id);
           renderBands();
         },
+        context: (_runtime, enabled) => {
+          const id = record.manifest.id;
+          if (enabled && !contextViews.has(id)) {
+            const view = new ContextUsageView();
+            contextViews.set(id, view);
+            contextShadow.append(view.root);
+          } else if (!enabled) {
+            contextViews.get(id)?.dispose();
+            contextViews.delete(id);
+          }
+          renderContext();
+        },
         usage: currentUsage,
         readDraft,
         insertDraft: async (current, text) => {
@@ -1442,6 +1705,9 @@ ${text}`, "Add to draft") || current.stopped) return false;
           themes.clear(record.manifest.id);
           renderBands();
           refresh();
+          contextViews.get(record.manifest.id)?.dispose();
+          contextViews.delete(record.manifest.id);
+          renderContext();
         },
         fault: async (_runtime, reason) => {
           record.enabled = false;
@@ -1819,22 +2085,22 @@ ${text}`;
         broadcast();
       }), "danger"]);
       const controls = [...reason && !options.safeMode ? [button("Retry", () => retry(record), "xs")] : [], moreButton(`More actions for ${manifest.name}`, items), enableToggle(record)];
-      const element = row([document.createTextNode(manifest.name), stateBadge(record)], manifest.description, controls, [
+      const element2 = row([document.createTextNode(manifest.name), stateBadge(record)], manifest.description, controls, [
         meta(`${manifest.version} \xB7 ${manifest.author} \xB7 ${count} permission${count === 1 ? "" : "s"}`),
         ...reason ? [node("p", { class: "error", text: `Stopped: ${reason.replace(/\.?\s*$/, ".")} Retry, or ask your AI for a fix from the menu.` })] : []
       ]);
-      element.dataset.mod = manifest.id;
-      return element;
+      element2.dataset.mod = manifest.id;
+      return element2;
     }
     function pendingRow(entry) {
       const { manifest } = entry.bundle;
       const installed = recordFor(manifest.id);
-      const element = row([document.createTextNode(manifest.name), badge(installed ? "Update" : "New", "pending")], manifest.description, [
+      const element2 = row([document.createTextNode(manifest.name), badge(installed ? "Update" : "New", "pending")], manifest.description, [
         moreButton(`More actions for ${manifest.name}`, [["Dismiss", () => void run(() => dismiss(entry)), "danger"]]),
         button("Review", () => showReview({ bundle: entry.bundle, entry }), "primary xs")
       ], [meta(`${installed ? `${installed.manifest.version} \u2192 ` : ""}${manifest.version} \xB7 ${manifest.author} \xB7 ${SOURCE_LABEL[entry.source]} \xB7 ${ago(entry.receivedAt)}`)]);
-      element.dataset.pending = manifest.id;
-      return element;
+      element2.dataset.pending = manifest.id;
+      return element2;
     }
     function problemRow(problem) {
       return row([document.createTextNode(problem.name), badge("Can\u2019t install", "stopped")], "", [
@@ -1895,22 +2161,22 @@ ${text}`;
           const installed = recordFor(manifest.id);
           const more = moreButton(`More actions for ${manifest.name}`, [["Edit", () => showEdit(manifest.id)]]);
           if (!installed) {
-            const element2 = row(manifest.name, manifest.description, [more, button("Review", () => showReview({ bundle }), "xs")], [meta(`${manifest.version} \xB7 not installed`)]);
-            element2.dataset.example = manifest.id;
-            return element2;
+            const element3 = row(manifest.name, manifest.description, [more, button("Review", () => showReview({ bundle }), "xs")], [meta(`${manifest.version} \xB7 not installed`)]);
+            element3.dataset.example = manifest.id;
+            return element3;
           }
           const current = sameBundle(installed, bundle);
-          const element = row([document.createTextNode(manifest.name), stateBadge(installed)], manifest.description, [
+          const element2 = row([document.createTextNode(manifest.name), stateBadge(installed)], manifest.description, [
             more,
             ...current ? [] : [button("Review update", () => showReview({ bundle }), "xs")],
             ...installed.quarantined && !options.safeMode ? [button("Retry", () => retry(installed), "xs")] : [],
             enableToggle(installed)
           ], [meta(current ? `${manifest.version} \xB7 installed` : `${installed.manifest.version} installed \xB7 ${manifest.version} included`)]);
-          element.dataset.mod = manifest.id;
-          element.dataset.example = manifest.id;
-          return element;
+          element2.dataset.mod = manifest.id;
+          element2.dataset.example = manifest.id;
+          return element2;
         });
-        content.append(section("Built-in", list.length ? list : [note("No built-in mods in this build.")]), node("p", { class: "explain", text: "Included with Mods for T3 Code. Review one to install it; it starts right away and you can switch it off here or under Installed. Themes use T3\u2019s own color tokens and restore your appearance when turned off." }));
+        content.append(section("Built-in", list.length ? list : [note("No built-in mods in this build.")]), node("p", { class: "explain", text: "Included with Mods for T3 Code. Review one to install it; it starts right away and you can switch it off here or under Installed. Context Usage opens a token inspector; Token Weather shows a compact usage forecast." }));
       } else if (tab === "commands") {
         let show2 = function() {
           list.replaceChildren();
@@ -2163,6 +2429,7 @@ ${text}`;
         connectTelemetry();
         connectArtifacts();
         const usage = currentUsage();
+        renderContext();
         for (const runtime of runtimes.values()) {
           runtime.emit("app.route", lastPath);
           runtime.emit("session.usage", usage);
@@ -2209,6 +2476,7 @@ ${text}`;
       if (disposed) return;
       disposed = true;
       for (const id of [...runtimes.keys()]) stop(id);
+      contextDock.dispose();
       leaveInline();
       detachSidebar();
       observer.disconnect();
@@ -2253,7 +2521,7 @@ ${text}`;
   // renderer-entry.js
   if (!window.__modsForT3Installing && !window.__modsForT3Code) {
     window.__modsForT3Installing = true;
-    mount({ examples: [{ "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "focus-timer", "version": "1.0.0", "name": "Focus timer", "description": "A small timer in the Mods tray. Start a 25 minute session and get a reminder when it ends.", "author": "Mods for T3 Code", "permissions": ["ui.panels", "ui.commands", "ui.notify"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/focus-timer/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    let remaining = 25 * 60;\n    let running = false;\n    async function draw() {\n      const minutes = Math.floor(remaining / 60);\n      const seconds = String(remaining % 60).padStart(2, "0");\n      await api.panels.set({ title: `${minutes}:${seconds}`, body: running ? "One task at a time. Your focus session is running." : "Ready for a little focused work?", actions: [{ id: "toggle", label: running ? "Pause" : "Start" }, { id: "reset", label: "Reset" }] });\n    }\n    api.panels.action("toggle", async () => {\n      running = !running;\n      await draw();\n    });\n    api.panels.action("reset", async () => {\n      remaining = 25 * 60;\n      running = false;\n      await draw();\n    });\n    await api.commands.register({ id: "start", title: "Start a 25 minute focus session" }, async () => {\n      remaining = 25 * 60;\n      running = true;\n      await draw();\n    });\n    const interval = setInterval(() => {\n      void (async () => {\n        if (!running) return;\n        remaining--;\n        if (remaining <= 0) {\n          running = false;\n          await api.notify("Focus session finished. Take a short break.");\n        }\n        await draw();\n      })();\n    }, 1e3);\n    await draw();\n    return () => clearInterval(interval);\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "prompt-kit", "version": "1.0.0", "name": "Prompt kit", "description": "Local commands that offer useful review and debugging prompts for your current T3 draft. Every insertion asks first.", "author": "Mods for T3 Code", "permissions": ["ui.commands", "draft.insert"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/prompt-kit/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    await api.commands.register({ id: "review", title: "Draft a focused code review" }, () => api.draft.insert("Review the changes in this thread. Focus on correctness and the behavior requested. Explain any concrete issues and the smallest fix."));\n    await api.commands.register({ id: "debug", title: "Draft a debugging request" }, () => api.draft.insert("Investigate this failure. Find the smallest reproducible cause, explain it, and make a focused fix. Run only the checks needed to confirm the fix."));\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "token-weather", "version": "1.0.0", "name": "Token weather", "description": "A one-line forecast above the composer: measured context use for the open thread, a sparkline of recent completed turns, and the last turn\u2019s change.", "author": "Mods for T3 Code", "permissions": ["ui.band", "session.usage", "storage"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/token-weather/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate,\n    formatTokens: () => formatTokens,\n    line: () => line,\n    weather: () => weather\n  });\n  var WEATHER = [\n    { below: 25, icon: "\\u2600", label: "Clear", tone: "yellow" },\n    { below: 50, icon: "\\u2601", label: "Cloudy", tone: "cyan" },\n    { below: 75, icon: "\\u2602", label: "Showers", tone: "blue" },\n    { below: 90, icon: "\\u2607", label: "Storm", tone: "magenta" },\n    { below: Infinity, icon: "\\u21AF", label: "Compact soon", tone: "red" }\n  ];\n  var BARS = "\\u2581\\u2582\\u2583\\u2584\\u2585\\u2586\\u2587\\u2588";\n  var MAX_TURNS = 12;\n  var MAX_THREADS = 40;\n  function formatTokens(value) {\n    if (value < 1e3) return String(value);\n    if (value < 999950) return `${(value / 1e3).toFixed(1).replace(/\\.0$/, "")}k`;\n    return `${(value / 1e6).toFixed(2).replace(/\\.?0+$/, "")}M`;\n  }\n  function weather(percent) {\n    const forecast = WEATHER.find((item) => percent < item.below);\n    if (forecast) return forecast;\n    const fallback = WEATHER[WEATHER.length - 1];\n    if (!fallback) throw new Error("Weather scale is empty.");\n    return fallback;\n  }\n  function turnKey(turnId) {\n    let hash = 2166136261;\n    for (let index = 0; index < turnId.length; index++) hash = Math.imul(hash ^ turnId.charCodeAt(index), 16777619);\n    return (hash >>> 0).toString(36);\n  }\n  function line(snapshot, turns) {\n    if (!snapshot) return [];\n    const parts = [];\n    let tone = "muted";\n    if (snapshot.maxTokens) {\n      const percent = Math.floor(snapshot.usedTokens / snapshot.maxTokens * 100);\n      const forecast = weather(percent);\n      tone = forecast.tone;\n      parts.push({ text: `${forecast.icon} ${forecast.label}`, tone }, { text: `  ${percent}%` }, { text: `  ${formatTokens(snapshot.usedTokens)} / ${formatTokens(snapshot.maxTokens)}`, tone: "muted" });\n    } else {\n      parts.push({ text: "\\u25CC Window unknown", tone: "muted" }, { text: `  ${formatTokens(snapshot.usedTokens)} used \\xB7 window size unavailable`, tone: "muted" });\n    }\n    if (turns.length) {\n      const scale = snapshot.maxTokens ?? Math.max(...turns, 1);\n      parts.push({ text: `  ${turns.map((used) => BARS[Math.min(7, Math.round(used / scale * 7))] ?? "").join("")}`, tone });\n    }\n    if (turns.length > 1) {\n      const latest = turns.at(-1);\n      const prior = turns.at(-2);\n      if (latest !== void 0 && prior !== void 0) {\n        const delta = latest - prior;\n        parts.push(delta >= 0 ? { text: `  \\u25B2 +${formatTokens(delta)} last turn` } : { text: `  \\u25BC \\u2212${formatTokens(-delta)} last turn`, tone: "cyan" });\n      }\n    }\n    return parts;\n  }\n  function isRecord(value) {\n    return typeof value === "object" && value !== null && !Array.isArray(value);\n  }\n  function readTurn(value) {\n    if (!Array.isArray(value) || typeof value[0] !== "string" || typeof value[1] !== "number") return null;\n    if (!Number.isSafeInteger(value[1]) || value[1] < 0) return null;\n    return [value[0], value[1]];\n  }\n  function historyPayload(threads) {\n    const encoded = [];\n    for (const [threadId, turns] of threads) encoded.push([threadId, turns.map((turn) => [turn[0], turn[1]])]);\n    return { version: 1, threads: encoded };\n  }\n  async function activate(api) {\n    const threads = /* @__PURE__ */ new Map();\n    const saved = await api.storage.get("history");\n    if (isRecord(saved) && saved.version === 1 && Array.isArray(saved.threads)) {\n      for (const item of saved.threads.slice(-MAX_THREADS)) {\n        if (!Array.isArray(item) || typeof item[0] !== "string" || !Array.isArray(item[1])) continue;\n        const turns = [];\n        for (const turn of item[1]) {\n          const stored = readTurn(turn);\n          if (stored) turns.push(stored);\n        }\n        threads.set(item[0], turns.slice(-MAX_TURNS));\n      }\n    }\n    let current = await api.session.usage();\n    let shown = "";\n    function record(snapshot) {\n      if (!snapshot?.complete || !snapshot.turnId) return;\n      const turns = threads.get(snapshot.threadId) ?? [];\n      const key = turnKey(snapshot.turnId);\n      const existing = turns.find((turn) => turn[0] === key);\n      if (existing) {\n        if (existing[1] === snapshot.usedTokens) return;\n        existing[1] = snapshot.usedTokens;\n      } else turns.push([key, snapshot.usedTokens]);\n      threads.delete(snapshot.threadId);\n      threads.set(snapshot.threadId, turns.slice(-MAX_TURNS));\n      while (threads.size > MAX_THREADS) {\n        const oldest = threads.keys().next().value;\n        if (oldest === void 0) break;\n        threads.delete(oldest);\n      }\n      void api.storage.set("history", historyPayload(threads));\n    }\n    async function draw() {\n      const parts = line(current, current ? (threads.get(current.threadId) ?? []).map((turn) => turn[1]) : []);\n      const text = JSON.stringify(parts);\n      if (text === shown) return;\n      shown = text;\n      if (parts.length) await api.band.set(parts);\n      else await api.band.clear();\n    }\n    async function update(snapshot) {\n      current = snapshot;\n      record(snapshot);\n      await draw();\n    }\n    api.on("session.usage", update);\n    api.on("turn.complete", (snapshot) => update(snapshot));\n    record(current);\n    await draw();\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "midnight-theme", "version": "1.0.0", "name": "Midnight blue", "description": "A calm dark palette using T3\u2019s native theme tokens. Turning it off restores your normal appearance.", "author": "Mods for T3 Code", "permissions": ["ui.theme"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/midnight-theme/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    await api.theme.set({\n      background: "#17212f",\n      foreground: "#edf2f8",\n      card: "#1d2939",\n      "card-foreground": "#edf2f8",\n      popover: "#253348",\n      "popover-foreground": "#edf2f8",\n      primary: "#8db9ef",\n      "primary-foreground": "#152033",\n      secondary: "#263750",\n      "secondary-foreground": "#edf2f8",\n      muted: "#243247",\n      "muted-foreground": "#b8c5d8",\n      accent: "#304562",\n      "accent-foreground": "#edf2f8",\n      border: "#3e526d",\n      input: "#435872",\n      ring: "#8db9ef",\n      sidebar: "#131d2b",\n      "sidebar-foreground": "#edf2f8",\n      "sidebar-accent": "#304562",\n      "sidebar-accent-foreground": "#edf2f8",\n      "sidebar-border": "#3e526d",\n      "sidebar-ring": "#8db9ef"\n    });\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "paper-theme", "version": "1.0.0", "name": "Quiet paper", "description": "A soft light palette with blue controls. Uses T3\u2019s own tokens and restores the original theme when disabled.", "author": "Mods for T3 Code", "permissions": ["ui.theme"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/paper-theme/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    await api.theme.set({\n      background: "#f5f6f8",\n      foreground: "#253044",\n      card: "#ffffff",\n      "card-foreground": "#253044",\n      popover: "#ffffff",\n      "popover-foreground": "#253044",\n      primary: "#284f88",\n      "primary-foreground": "#ffffff",\n      secondary: "#e7ecf3",\n      "secondary-foreground": "#253044",\n      muted: "#edf0f4",\n      "muted-foreground": "#536176",\n      accent: "#dce5f2",\n      "accent-foreground": "#253044",\n      border: "#c8d2df",\n      input: "#becbdb",\n      ring: "#284f88",\n      sidebar: "#e7ecf3",\n      "sidebar-foreground": "#253044",\n      "sidebar-accent": "#dce5f2",\n      "sidebar-accent-foreground": "#253044",\n      "sidebar-border": "#c8d2df",\n      "sidebar-ring": "#284f88"\n    });\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }], ...window.__MODS_FOR_T3_OPTIONS__, sandboxDocument: `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; connect-src 'none'; img-src 'none'; style-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'"><title>Isolated mod runtime</title></head><body><script>"use strict";
+    mount({ examples: [{ "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "context-usage", "version": "1.0.0", "name": "Context Usage", "description": "A live context usage ring. Click to see measured tokens, window capacity, and category counts when T3 supplies them.", "author": "Mods for T3 Code", "permissions": ["ui.context", "session.usage"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/context-usage/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    await api.context.show();\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "token-weather", "version": "1.0.0", "name": "Token weather", "description": "A one-line forecast above the composer: measured context use for the open thread and the last turn\u2019s change.", "author": "Mods for T3 Code", "permissions": ["ui.band", "session.usage", "storage"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/token-weather/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate,\n    formatTokens: () => formatTokens,\n    line: () => line,\n    weather: () => weather\n  });\n  var WEATHER = [\n    { below: 25, icon: "\\u2600", label: "Clear", tone: "yellow" },\n    { below: 50, icon: "\\u2601", label: "Cloudy", tone: "cyan" },\n    { below: 75, icon: "\\u2602", label: "Showers", tone: "blue" },\n    { below: 90, icon: "\\u2607", label: "Storm", tone: "magenta" },\n    { below: Infinity, icon: "\\u21AF", label: "Compact soon", tone: "red" }\n  ];\n  var MAX_TURNS = 12;\n  var MAX_THREADS = 40;\n  function formatTokens(value) {\n    if (value < 1e3) return String(value);\n    if (value < 999950) return `${(value / 1e3).toFixed(1).replace(/\\.0$/, "")}k`;\n    return `${(value / 1e6).toFixed(2).replace(/\\.?0+$/, "")}M`;\n  }\n  function weather(percent) {\n    const forecast = WEATHER.find((item) => percent < item.below);\n    if (forecast) return forecast;\n    const fallback = WEATHER[WEATHER.length - 1];\n    if (!fallback) throw new Error("Weather scale is empty.");\n    return fallback;\n  }\n  function turnKey(turnId) {\n    let hash = 2166136261;\n    for (let index = 0; index < turnId.length; index++) hash = Math.imul(hash ^ turnId.charCodeAt(index), 16777619);\n    return (hash >>> 0).toString(36);\n  }\n  function line(snapshot, turns) {\n    if (!snapshot) return [];\n    const parts = [];\n    if (snapshot.maxTokens) {\n      const percent = Math.floor(snapshot.usedTokens / snapshot.maxTokens * 100);\n      const forecast = weather(percent);\n      parts.push({ text: `${forecast.icon} ${forecast.label}`, tone: forecast.tone }, { text: `  ${percent}%` }, { text: `  ${formatTokens(snapshot.usedTokens)} / ${formatTokens(snapshot.maxTokens)}`, tone: "muted" });\n    } else {\n      parts.push({ text: "\\u25CC Window unknown", tone: "muted" }, { text: `  ${formatTokens(snapshot.usedTokens)} used \\xB7 window size unavailable`, tone: "muted" });\n    }\n    if (turns.length > 1) {\n      const latest = turns.at(-1);\n      const prior = turns.at(-2);\n      if (latest !== void 0 && prior !== void 0) {\n        const delta = latest - prior;\n        parts.push(delta >= 0 ? { text: `  \\u25B2 +${formatTokens(delta)} last turn` } : { text: `  \\u25BC \\u2212${formatTokens(-delta)} last turn`, tone: "cyan" });\n      }\n    }\n    return parts;\n  }\n  function isRecord(value) {\n    return typeof value === "object" && value !== null && !Array.isArray(value);\n  }\n  function readTurn(value) {\n    if (!Array.isArray(value) || typeof value[0] !== "string" || typeof value[1] !== "number") return null;\n    if (!Number.isSafeInteger(value[1]) || value[1] < 0) return null;\n    return [value[0], value[1]];\n  }\n  function historyPayload(threads) {\n    const encoded = [];\n    for (const [threadId, turns] of threads) encoded.push([threadId, turns.map((turn) => [turn[0], turn[1]])]);\n    return { version: 1, threads: encoded };\n  }\n  async function activate(api) {\n    const threads = /* @__PURE__ */ new Map();\n    const saved = await api.storage.get("history");\n    if (isRecord(saved) && saved.version === 1 && Array.isArray(saved.threads)) {\n      for (const item of saved.threads.slice(-MAX_THREADS)) {\n        if (!Array.isArray(item) || typeof item[0] !== "string" || !Array.isArray(item[1])) continue;\n        const turns = [];\n        for (const turn of item[1]) {\n          const stored = readTurn(turn);\n          if (stored) turns.push(stored);\n        }\n        threads.set(item[0], turns.slice(-MAX_TURNS));\n      }\n    }\n    let current = await api.session.usage();\n    let shown = "";\n    function record(snapshot) {\n      if (!snapshot?.complete || !snapshot.turnId) return;\n      const turns = threads.get(snapshot.threadId) ?? [];\n      const key = turnKey(snapshot.turnId);\n      const existing = turns.find((turn) => turn[0] === key);\n      if (existing) {\n        if (existing[1] === snapshot.usedTokens) return;\n        existing[1] = snapshot.usedTokens;\n      } else turns.push([key, snapshot.usedTokens]);\n      threads.delete(snapshot.threadId);\n      threads.set(snapshot.threadId, turns.slice(-MAX_TURNS));\n      while (threads.size > MAX_THREADS) {\n        const oldest = threads.keys().next().value;\n        if (oldest === void 0) break;\n        threads.delete(oldest);\n      }\n      void api.storage.set("history", historyPayload(threads));\n    }\n    async function draw() {\n      const parts = line(current, current ? (threads.get(current.threadId) ?? []).map((turn) => turn[1]) : []);\n      const text = JSON.stringify(parts);\n      if (text === shown) return;\n      shown = text;\n      if (parts.length) await api.band.set(parts);\n      else await api.band.clear();\n    }\n    async function update(snapshot) {\n      current = snapshot;\n      record(snapshot);\n      await draw();\n    }\n    api.on("session.usage", update);\n    api.on("turn.complete", (snapshot) => update(snapshot));\n    record(current);\n    await draw();\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }], ...window.__MODS_FOR_T3_OPTIONS__, sandboxDocument: `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; connect-src 'none'; img-src 'none'; style-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'"><title>Isolated mod runtime</title></head><body><script>"use strict";
 (() => {
   // payload/public/sandbox.ts
   (() => {
@@ -2329,6 +2597,7 @@ ${text}`;
         notify: (message) => call("notify", [message]),
         theme: Object.freeze({ set: (colors) => call("theme.set", [colors]), clear: () => call("theme.clear", []) }),
         band: Object.freeze({ set: (parts) => call("band.set", [parts]), clear: () => call("band.clear", []) }),
+        context: Object.freeze({ show: () => call("context.show", []), clear: () => call("context.clear", []) }),
         session: Object.freeze({ usage: () => call("session.usage", []) }),
         route: Object.freeze({ get: () => call("route.get", []) }),
         draft: Object.freeze({ read: () => call("draft.read", []), insert: (text) => call("draft.insert", [text]) }),

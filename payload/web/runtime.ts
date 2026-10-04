@@ -11,6 +11,7 @@ export interface RuntimeHooks {
   notify(runtime: ModRuntime, text: string): void;
   theme(runtime: ModRuntime, colors: unknown): void;
   band(runtime: ModRuntime, parts: ReturnType<typeof validateBand> | null): void;
+  context(runtime: ModRuntime, enabled: boolean): void;
   usage(): UsageSnapshot | null;
   readDraft(): string;
   insertDraft(runtime: ModRuntime, text: string): Promise<boolean>;
@@ -19,7 +20,7 @@ export interface RuntimeHooks {
   fault(runtime: ModRuntime, reason: string): void | Promise<void>;
 }
 
-const MOD_METHODS = new Set<string>(["events.subscribe", "commands.register", "panels.set", "panels.clear", "notify", "theme.set", "theme.clear", "band.set", "band.clear", "session.usage", "route.get", "draft.read", "draft.insert", "storage.get", "storage.set", "log"]);
+const MOD_METHODS = new Set<string>(["events.subscribe", "commands.register", "panels.set", "panels.clear", "notify", "theme.set", "theme.clear", "band.set", "band.clear", "context.show", "context.clear", "session.usage", "route.get", "draft.read", "draft.insert", "storage.get", "storage.set", "log"]);
 
 function isRecord(value: unknown): value is { [key: string]: unknown } {
   return typeof value === "object" && value !== null;
@@ -158,6 +159,8 @@ export class ModRuntime {
       case "theme.clear": require("ui.theme"); this.hooks.theme(this, null); return;
       case "band.set": require("ui.band"); this.hooks.band(this, validateBand(args[0])); return;
       case "band.clear": require("ui.band"); this.hooks.band(this, null); return;
+      case "context.show": require("ui.context"); require("session.usage"); this.hooks.context(this, true); return;
+      case "context.clear": require("ui.context"); this.hooks.context(this, false); return;
       case "session.usage": require("session.usage"); return this.hooks.usage();
       case "route.get": require("app.route"); return routePath();
       case "draft.read": require("draft.read"); return this.hooks.readDraft();

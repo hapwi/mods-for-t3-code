@@ -1,0 +1,10 @@
+{
+  "apiVersion": 1,
+  "id": "context-usage",
+  "version": "1.0.0",
+  "name": "Context Usage",
+  "description": "A live context usage ring. Click to see measured tokens, window capacity, and category counts when T3 supplies them.",
+  "author": "Mods for T3 Code",
+  "permissions": ["ui.context", "session.usage"],
+  "entry": "mod.ts"
+}

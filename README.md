@@ -1,5 +1,7 @@
 # Mods for T3 Code
 
+<img src="assets/favicon.png" width="40" height="40" alt="Mods for T3 Code puzzle icon">
+
 Live mods inside T3 Code’s Electron interface: a Mods sidebar button, a Settings → Mods section, themes, commands, sidebar panels, and a band above the prompt. MIT licensed and independent of the T3 team.
 
 Inspired by [Anthropic’s Claude Code mods](https://claude.com/blog/claude-code-mods) and its [mods API reference](https://code.claude.com/docs/en/plugins/mods/reference). This is a T3-specific SDK; Claude Code plugins do not install unchanged.
@@ -46,7 +48,7 @@ Invoke-WebRequest https://raw.githubusercontent.com/hapwi/mods-for-t3-code/main/
 
 Open the puzzle icon at the bottom of T3’s sidebar, or **Settings → Mods**.
 
-- **Built-in:** install Token Weather, Focus Timer, Prompt Kit, Midnight Theme, or Paper Theme. Installed examples show their running state and a live toggle.
+- **Built-in:** install Context Usage or Token Weather. Installed examples show their running state and a live toggle.
 - **Installed:** generated mods appear under **Waiting for review**, which survives closing the manager or restarting T3. Review source and permissions, then install to switch the mod on immediately. Rows show Starting, Active, Stopped, Off, Paused, or Safe mode; stopped mods offer Retry and Ask AI to fix. Inspect, export, and remove actions are in the ⋯ menu.
 - **Create:** describe a mod and put the generated authoring prompt into the current T3 composer. Choose your already logged-in provider/model and send it normally. The agent returns a manifest and JavaScript in two tagged code blocks. The manager reads the finished native response and lists the mod for review, including remote workspaces and replies outside the visible conversation. A local inbox is also watched. Invalid bundles show a reason and an Ask AI to fix action. No separate AI account or API key is required. The prompt includes T3’s supported surfaces, theme conventions, live lifecycle, and handling for missing context data.
 - **Import:** choose a `.t3mod` file or paste a complete bundle or the two tagged blocks from a reply. Validation errors stay beside the input.
@@ -56,12 +58,18 @@ Open the puzzle icon at the bottom of T3’s sidebar, or **Settings → Mods**.
 
 Prompt modifications ask before inserting into the draft and never send it. Multiple theme mods use the last activated theme; disabling it restores the previous theme, and disabling all theme mods restores T3’s colors. Themes cover native chrome and sidebar rows, including T3’s selected-theme overrides.
 
+### Context Usage
+
+Install **Context Usage** from **Mods → Built-in**. A compact progress ring and percentage appear in the native composer meter slot; click the ring to open **Context Usage** with measured tokens, window capacity, a segmented bar, and category rows matching the Cursor-style inspector. Escape, clicking outside, or the close button dismisses it. Disabling the mod restores T3’s original meter. Older layouts show the control above the composer.
+
+The categories are System prompt, Tool definitions, Rules, Skills, MCP & dynamic tools, Summarized conversation, and Conversation. T3’s current usage contract reports the total but does **not** provide these category counts. They show **Unavailable**, with the measured total under **Unclassified context**; nothing is estimated or shown as a fabricated zero. A numeric `breakdown` from T3 can populate the categories when available. The ring stays hidden before a measurement and handles unknown window sizes without guessing.
+
 ### Token Weather
 
-A compact, colored line above the prompt shows the measured context percentage, tokens used/window size, a last-12-turn sparkline, and the change since the previous completed turn:
+A compact, colored line above the prompt shows the measured context percentage, tokens used/window size, and the change since the previous completed turn:
 
 ```text
-☂ Showers  67%  134.4k / 200k  ▁▂▃▄▅▆  ▲ +98.3k last turn
+☂ Showers  67%  134.4k / 200k  ▲ +98.3k last turn
 ```
 
 Weather thresholds are Clear below 25%, Cloudy below 50%, Showers below 75%, Storm below 90%, and Compact soon at 90% or higher. Measurements refresh as T3 reports them; history advances on completed turns. The turn delta appears once two completed turns have been measured. Compaction can produce a negative change.
@@ -129,12 +137,12 @@ npm run build
 npm run pack:examples
 npm run demo
 # In a second terminal:
-node scripts/browser-check.ts
+node scripts/browser-check.ts --context-usage
 ```
 
 Production source, example mods, and development scripts use TypeScript with strict checking. `dist/` contains the compiled JavaScript and bundled CLI, so end-user installations need no compiler, build toolchain, or npm dependencies. Regenerate it when runtime or bundled mods change. Focused archive, manifest, telemetry, and update tests live under `test/`; set `MODS_FOR_T3_DATA` to a temporary directory when running installer tests.
 
-Focused archive, telemetry, and renderer checks cover T3 `0.0.46-nightly.20261003.2623`. An isolated Electron 44.4.2 window uses the packaged CSP, sandbox, context isolation, shipped host, and real mod workers. Its integration check covers native hash navigation, WebSocket/HTTP reports, warm-cache hydration, forecast/chart/turn deltas, composer spacing, built-in installation state, native AI handoff without rendered code, persistent review after renderer remount, live toggling, and cleanup. Run it with `node scripts/electron-integration-check.ts /path/to/electron`. Focused Chromium checks cover manager flows and theme application/restoration against native 2632/2638 CSS rules. Strict TypeScript checking and earlier temporary CLI/macOS install-and-restore fixtures pass. An earlier patch launched in the existing macOS Nightly app; this revision has not been installed on the user's Mac. macOS end-user installation, Windows runtime/signing and native updater flows still require platform testing.
+Focused archive, telemetry, and renderer checks cover T3 `0.0.46-nightly.20261003.2623`. An isolated Electron 44.4.2 window uses the packaged CSP, sandbox, context isolation, shipped host, and real mod workers. Its integration check covers native hash navigation, WebSocket/HTTP reports, warm-cache hydration, forecast/turn deltas, composer spacing, built-in installation state, native AI handoff without rendered code, persistent review after renderer remount, live toggling, and cleanup. Run it with `node scripts/electron-integration-check.ts /path/to/electron`. Focused Chromium checks cover manager flows and theme application/restoration against native 2632/2638 CSS rules. Strict TypeScript checking and earlier temporary CLI/macOS install-and-restore fixtures pass. An earlier patch launched in the existing macOS Nightly app; this revision has not been installed on the user's Mac. macOS end-user installation, Windows runtime/signing and native updater flows still require platform testing.
 
 
 See [architecture](docs/architecture.md), [changelog](CHANGELOG.md), and [license](LICENSE).

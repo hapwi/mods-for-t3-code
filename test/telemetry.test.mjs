@@ -29,6 +29,25 @@ async function send(socket, value) { socket.receive(value); await new Promise(re
 const activity = (usedTokens, turnId = "turn-a", maxTokens = 200000, time = "2026-10-03T10:00:00Z") => ({ kind: "context-window.updated", turnId, createdAt: time, payload: { usedTokens, maxTokens, privateField: "never forwarded" } });
 const update = a => ({ _tag: "Chunk", values: [{ kind: "event", event: { type: "thread.activity-appended", payload: { threadId: "thread-a", activity: a } } }] });
 
+test("context breakdowns forward numeric categories only and refresh unchanged totals", async () => {
+  const { window, socket } = harness();
+  const events = [];
+  window.__T3_MODS_TELEMETRY__.subscribe(event => events.push(event));
+  const measured = activity(100);
+  measured.payload.breakdown = { systemPrompt: 10, rules: 0, conversation: 70, privateText: "secret" };
+  await send(socket, update(measured));
+  assert.deepEqual(window.__T3_MODS_TELEMETRY__.get().breakdown, { systemPrompt: 10, rules: 0, conversation: 70 });
+  const copy = window.__T3_MODS_TELEMETRY__.get(); copy.breakdown.rules = 99;
+  assert.equal(window.__T3_MODS_TELEMETRY__.get().breakdown.rules, 0);
+  measured.payload.breakdown.conversation = 80;
+  await send(socket, update(measured));
+  assert.equal(events.length, 2);
+  assert.equal(events.at(-1).value.breakdown.conversation, 80);
+  measured.payload.breakdown.conversation = 1000;
+  await send(socket, update(measured));
+  assert.equal(window.__T3_MODS_TELEMETRY__.get().breakdown, undefined);
+});
+
 test("complete native assistant bundles reach the host without a rendered code block", async () => {
   const { window, socket } = harness();
   const bundle = { format: "t3mod/1", manifest: { id: "custom-mod" }, code: 'globalThis.T3Mod={activate(){}};' };

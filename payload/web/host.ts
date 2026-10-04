@@ -4,12 +4,13 @@ import { MAX_BUNDLE_BYTES, PERMISSIONS, usageSnapshot, validateBundle } from "./
 import { database } from "./database.ts";
 import type { PendingRecord, PendingSource } from "./database.ts";
 import { ModRuntime } from "./runtime.ts";
-import { MODS_ICON, attachSidebarButton, composer, dockAboveComposer, insertDraft, readDraft, sidebarFooter } from "./adapter.ts";
+import { MODS_ICON, attachSidebarButton, composer, dockAboveComposer, dockContextControl, insertDraft, readDraft, sidebarFooter } from "./adapter.ts";
 import { authorPrompt, editPrompt, fixPrompt } from "./author.ts";
 import type { EditSource } from "./author.ts";
 import { style } from "./style.ts";
 import { ThemeHost } from "./themes.ts";
 import { routePath } from "./route.ts";
+import { ContextUsageView } from "./context-usage.ts";
 
 type MenuEntry = readonly [text: string, action: () => void, className?: string];
 type SeenInbox = { [hash: string]: number };
@@ -182,6 +183,11 @@ export async function mount(options: MountOptions): Promise<void> {
   const bandStack = node("div", { class: "band-stack" });
   bandShadow.append(node("style", { text: style }), bandStack);
   const bandDock = dockAboveComposer(bandRoot);
+  const contextRoot = node("div", { "data-t3mods": "context", style: "display:flex;align-items:center;flex:none" });
+  const contextShadow = contextRoot.attachShadow({ mode: "open" });
+  contextShadow.append(node("style", { text: style }));
+  const contextDock = dockContextControl(contextRoot);
+  const contextViews = new Map<string, ContextUsageView>();
   let records: ModRecord[] = [];
   const runtimes = new Map<string, ModRuntime>();
   const readyRuntimes = new WeakSet<ModRuntime>();
@@ -350,6 +356,11 @@ export async function mount(options: MountOptions): Promise<void> {
     bandStack.replaceChildren(...rows); bandDock.show(rows.length > 0);
   }
   // Measurements come only from the trusted preload and only for the open thread.
+  function renderContext(): void {
+    const usage = currentUsage();
+    for (const view of contextViews.values()) view.update(usage);
+    contextDock.show(contextViews.size > 0 && usage !== null);
+  }
   function currentUsage() {
     try { return usageSnapshot(telemetry?.get(routePath())); } catch { return null; }
   }
@@ -362,6 +373,7 @@ export async function mount(options: MountOptions): Promise<void> {
         if (event.name !== "session.usage" && event.name !== "turn.complete") return;
         const value = usageSnapshot(event.value);
         if (!value || currentUsage()?.threadId !== value.threadId) return;
+        renderContext();
         for (const runtime of runtimes.values()) runtime.emit(event.name, value);
       });
     } catch { telemetry = undefined; }
@@ -412,6 +424,13 @@ export async function mount(options: MountOptions): Promise<void> {
       notify: (_runtime, text) => notify(record.manifest.name, text),
       theme: (_runtime, colors) => { if (colors) themes.set(record.manifest.id, colors); else themes.clear(record.manifest.id); },
       band: (_runtime, parts) => { if (parts) bands.set(record.manifest.id, parts); else bands.delete(record.manifest.id); renderBands(); },
+      context: (_runtime, enabled) => {
+        const id = record.manifest.id;
+        if (enabled && !contextViews.has(id)) {
+          const view = new ContextUsageView(); contextViews.set(id, view); contextShadow.append(view.root);
+        } else if (!enabled) { contextViews.get(id)?.dispose(); contextViews.delete(id); }
+        renderContext();
+      },
       usage: currentUsage,
       readDraft,
       insertDraft: async (current, text) => {
@@ -422,6 +441,7 @@ export async function mount(options: MountOptions): Promise<void> {
       removed: (current) => {
         if (runtimes.get(record.manifest.id) !== current) return;
         runtimes.delete(record.manifest.id); commands.delete(record.manifest.id); panels.delete(record.manifest.id); bands.delete(record.manifest.id); themes.clear(record.manifest.id); renderBands(); refresh();
+        contextViews.get(record.manifest.id)?.dispose(); contextViews.delete(record.manifest.id); renderContext();
       },
       fault: async (_runtime, reason) => {
         record.enabled = false; record.quarantined = reason;
@@ -734,7 +754,7 @@ export async function mount(options: MountOptions): Promise<void> {
         ], [meta(current ? `${manifest.version} · installed` : `${installed.manifest.version} installed · ${manifest.version} included`)]);
         element.dataset.mod = manifest.id; element.dataset.example = manifest.id; return element;
       });
-      content.append(section("Built-in", list.length ? list : [note("No built-in mods in this build.")]), node("p", { class: "explain", text: "Included with Mods for T3 Code. Review one to install it; it starts right away and you can switch it off here or under Installed. Themes use T3’s own color tokens and restore your appearance when turned off." }));
+      content.append(section("Built-in", list.length ? list : [note("No built-in mods in this build.")]), node("p", { class: "explain", text: "Included with Mods for T3 Code. Review one to install it; it starts right away and you can switch it off here or under Installed. Context Usage opens a token inspector; Token Weather shows a compact usage forecast." }));
     } else if (tab === "commands") {
       const search = node("input", { type: "search", placeholder: "Find a mod command…", "aria-label": "Find command" });
       const list = node("div"); content.append(search, section("Commands", [list]));
@@ -906,6 +926,7 @@ export async function mount(options: MountOptions): Promise<void> {
       lastPath = path; leaveInline(); if (settingsItem) { settingsItem.remove(); settingsItem = undefined; } attachSettings();
       connectTelemetry(); connectArtifacts();
       const usage = currentUsage();
+      renderContext();
       for (const runtime of runtimes.values()) { runtime.emit("app.route", lastPath); runtime.emit("session.usage", usage); }
     }
   };
@@ -930,6 +951,7 @@ export async function mount(options: MountOptions): Promise<void> {
   window.__modsForT3Code = { open, importCandidate, async dispose() {
     if (disposed) return; disposed = true;
     for (const id of [...runtimes.keys()]) stop(id);
+    contextDock.dispose();
     leaveInline(); detachSidebar(); observer.disconnect(); clearTimeout(bundleScan); panelRoot.remove(); bandDock.dispose(); try { unsubscribeTelemetry?.(); } catch { /* telemetry can already be gone */ } try { unsubscribeArtifacts?.(); } catch { /* bridge can already be gone */ } for (const notice of notices.splice(0)) notice.remove(); settingsItem?.remove(); clearTimeout(draftTimer); channel?.close();
     window.removeEventListener("popstate", onRoute);
     window.removeEventListener("hashchange", onRoute);

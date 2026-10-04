@@ -1,5 +1,5 @@
 /** Browser worker API, version 1. Import this file as a type only. */
-export type Permission = "ui.panels" | "ui.commands" | "ui.notify" | "ui.theme" | "ui.band" | "session.usage" | "app.route" | "draft.read" | "draft.insert" | "storage";
+export type Permission = "ui.panels" | "ui.commands" | "ui.notify" | "ui.theme" | "ui.band" | "ui.context" | "session.usage" | "app.route" | "draft.read" | "draft.insert" | "storage";
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export interface ModManifest {
   apiVersion: 1;
@@ -36,6 +36,8 @@ export type ModMethod =
   | "theme.clear"
   | "band.set"
   | "band.clear"
+  | "context.show"
+  | "context.clear"
   | "session.usage"
   | "route.get"
   | "draft.read"
@@ -46,6 +48,8 @@ export type ModMethod =
 export type BandTone = "default" | "muted" | "yellow" | "cyan" | "blue" | "magenta" | "red";
 /** Plain single-line text. 1–16 parts, up to 160 characters each and 300 in total. No HTML. */
 export interface BandPart { text: string; tone?: BandTone }
+/** Optional measured categories. Missing entries are unavailable, not zero. */
+export type ContextBreakdown = Partial<Record<"systemPrompt" | "toolDefinitions" | "rules" | "skills" | "mcpTools" | "summarizedConversation" | "conversation", number>>;
 /** A measured context snapshot for the open thread. Nothing is estimated. */
 export interface UsageSnapshot {
   threadId: string;
@@ -57,6 +61,8 @@ export interface UsageSnapshot {
   measuredAt: number;
   /** True once the measured turn has completed. */
   complete: boolean;
+  /** Only present when T3 reports category counts; never inferred from conversation text. */
+  breakdown?: ContextBreakdown;
 }
 export interface ModApi {
   on(event: "app.route", handler: (value: string) => void | Promise<void>): () => void;
@@ -75,6 +81,8 @@ export interface ModApi {
   theme: { set(colors: Record<string, string>): Promise<void>; clear(): Promise<void> };
   /** One line above the composer. Requires ui.band. */
   band: { set(parts: BandPart[]): Promise<void>; clear(): Promise<void> };
+  /** Host-rendered usage ring and clickable breakdown. Requires ui.context and session.usage. Updates automatically for the open thread. */
+  context: { show(): Promise<void>; clear(): Promise<void> };
   /** Requires session.usage. */
   session: { usage(): Promise<UsageSnapshot | null> };
   route: { get(): Promise<string> };
