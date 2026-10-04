@@ -81,7 +81,7 @@ export class ContextUsageView {
     if (!this.popup.matches(":popover-open")) return;
     const anchor = this.trigger.getBoundingClientRect();
     const box = this.popup.getBoundingClientRect();
-    const left = Math.max(12, Math.min(anchor.right - box.width, window.innerWidth - box.width - 12));
+    const left = Math.max(12, Math.min(anchor.left, window.innerWidth - box.width - 12));
     const top = Math.max(12, Math.min(anchor.top - box.height - 8, window.innerHeight - box.height - 12));
     this.popup.style.left = `${left}px`; this.popup.style.top = `${top}px`;
   };

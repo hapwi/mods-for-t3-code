@@ -47,6 +47,8 @@
     const popup = control().querySelector(".context-popup");
     const box = popup.getBoundingClientRect();
     assert(box.width > 300 && box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight, "Popup fits viewport");
+    const anchor = control().querySelector(".context-trigger").getBoundingClientRect();
+    assert(Math.abs(box.left - anchor.left) < 1, "Popover bottom-left aligns with the native usage control");
     measure({ breakdown: { systemPrompt: 2400, toolDefinitions: 9800, rules: 31900, skills: 5000, mcpTools: 5900, summarizedConversation: 10300, conversation: 164600 } });
     await wait(() => control().querySelectorAll(".context-segment").length === 7, "category segments");
     assert(popup.matches(":popover-open") && control().textContent.includes("164.6K"), "Open panel updates live");
@@ -100,12 +102,28 @@
     await wait(() => control()?.querySelector(".context-popup:popover-open"), "real pointer opens fallback inspector");
     await new Promise(resolve => setTimeout(resolve, 150));
     assert(control().querySelector(".context-popup:popover-open"), "Fallback inspector stays open beside Token Weather");
+    const fallbackBox = control().querySelector(".context-popup").getBoundingClientRect();
+    const fallbackAnchor = control().querySelector(".context-trigger").getBoundingClientRect();
+    assert(Math.abs(fallbackBox.left - fallbackAnchor.left) < 1, "Popover bottom-left aligns with the shared-dock usage control");
+    control().querySelector('[aria-label="Close context usage"]').click();
+    window.__modsForT3Code.open("installed");
+    manager().querySelector('[data-mod="token-weather"] button[aria-label^="More actions"]').click();
+    [...manager().querySelectorAll('[role="menuitem"]')].find(item => item.textContent === "Remove").click();
+    await wait(() => manager().querySelector("dialog.ask[open]"), "remove confirmation");
+    const confirmation = manager().querySelector("dialog.ask[open]");
+    const confirmationBox = confirmation.getBoundingClientRect();
+    assert(confirmationBox.height < 220, "Short confirmation fits its content instead of stretching");
+    const removeBox = [...confirmation.querySelectorAll("button")].find(item => item.textContent === "Remove mod").getBoundingClientRect();
+    assert(removeBox.bottom <= confirmationBox.bottom && removeBox.bottom <= innerHeight, "Confirmation actions remain visible");
     if (capture) { output.dataset.status = "capture"; await wait(() => window.__contextUsageContinue, "visual capture"); output.dataset.status = "running"; }
+    [...confirmation.querySelectorAll("button")].find(item => item.textContent === "Cancel").click();
+    await wait(() => !manager().querySelector("dialog.ask[open]"), "cancel confirmation");
+    assert(manager().querySelector('[data-mod="token-weather"]'), "Cancel preserves the installed mod");
     assert((await fetch("/favicon.ico")).headers.get("Content-Type") === "image/vnd.microsoft.icon", "Favicon served");
     await window.__modsForT3Code.dispose();
     assert(!document.querySelector('[data-t3mods="context"]') && !document.querySelector("iframe"), "Host cleanup");
     output.dataset.status = "passed";
-    output.textContent = "Context Usage passed: real-worker installation, native slot/restoration, live breakdown, missing categories/window, thread switching, combined fallback without overlap, real pointer opens inspector, cleanup, and Token Weather without sparkline.";
+    output.textContent = "Context Usage passed: left-aligned popover, real pointer clicks, shared dock without overlap, compact remove confirmation and cancel, native restoration, live usage and cleanup.";
   } catch (error) {
     output.dataset.status = "failed"; output.textContent = (error.stack || String(error)) + "\nManager: " + manager()?.textContent.slice(-1500);
   }
