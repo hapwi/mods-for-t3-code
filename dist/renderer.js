@@ -196,6 +196,29 @@
     }
   };
 
+  // payload/web/builtin-updates.ts
+  var LEGACY_WEATHER = /* @__PURE__ */ new Set([
+    "ee89f18bd37f8cce096e42ebbb608a29389fa3f85ef973e133d300da697a89e8",
+    "6adf3981c6104b2319bbdf564b87e32ed42770cc821c07e38588f239210f023a"
+  ]);
+  async function updateLegacyWeather(record, examples) {
+    if (record.manifest.id !== "token-weather") return record;
+    const current = examples.find((bundle) => bundle.manifest.id === "token-weather");
+    if (!current || current.code === record.code) return record;
+    const { manifest: m } = record;
+    const serialized = JSON.stringify({
+      format: record.format,
+      manifest: { apiVersion: m.apiVersion, id: m.id, version: m.version, name: m.name, description: m.description, author: m.author, permissions: [...m.permissions].sort() },
+      code: record.code
+    });
+    const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(serialized));
+    const fingerprint = [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    if (!LEGACY_WEATHER.has(fingerprint)) return record;
+    const replacement = validateBundle(current);
+    if (replacement.manifest.author !== m.author || replacement.manifest.permissions.some((permission) => !m.permissions.includes(permission))) return record;
+    return { ...record, ...replacement };
+  }
+
   // payload/web/route.ts
   function routePath(value = location) {
     const path = value.hash?.startsWith("#/") ? value.hash.slice(1) : value.pathname;
@@ -1729,6 +1752,14 @@ ${text}`, "Add to draft") || current.stopped) return false;
     }
     async function reload() {
       records = await database.list();
+      for (let index = 0; index < records.length; index++) {
+        const record = records[index];
+        const updated = await updateLegacyWeather(record, options.examples ?? []);
+        if (updated === record) continue;
+        await database.save(updated);
+        records[index] = updated;
+        log(updated.manifest.name, "Updated the built-in to hide empty-context and first-turn placeholders.");
+      }
       paused = Boolean(await database.getSetting("paused"));
       pending = await loadPending();
       const reviewing = review?.entry;

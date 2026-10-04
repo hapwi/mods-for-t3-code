@@ -15,6 +15,7 @@ try {
   await writeFile(path.join(directory, "native.cjs"), "const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('__nativePreload',true);contextBridge.exposeInMainWorld('__fixtureRemount',()=>ipcRenderer.invoke('fixture-remount'));");
   await writeFile(path.join(directory, "package.json"), JSON.stringify({main: "main.cjs"}));
   await copyFile(fileURLToPath(new URL("../test/electron-integration.cjs", import.meta.url)), path.join(directory, "main.cjs"));
+  if (process.argv.includes("--weather-upgrade")) await copyFile(fileURLToPath(new URL("../test/fixtures/legacy-token-weather.json", import.meta.url)), path.join(directory, "legacy-token-weather.json"));
   await copyFile(fileURLToPath(new URL("../test/electron-composer.html", import.meta.url)), path.join(directory, "composer.html"));
   const environment = {...process.env}; delete environment.ELECTRON_RUN_AS_NODE;
   const child = spawn(executable, [directory, "--disable-gpu"], {stdio: ["ignore", "pipe", "inherit"], env: environment});

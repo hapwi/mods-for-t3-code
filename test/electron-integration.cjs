@@ -19,21 +19,39 @@ app.whenReady().then(async()=>{
   ipcMain.handle('fixture-remount',()=>w.webContents.executeJavaScript(fs.readFileSync(__dirname+'/renderer.js','utf8')));
   w.webContents.on('console-message',d=>{if(d.level==='error')console.error(d.message)});
   await w.loadURL('t3code://app/#/local/thread-a');
-  await w.webContents.executeJavaScript('('+start.toString()+')('+port+')');
+  const legacyPath=__dirname+'/legacy-token-weather.json';
+  const legacy=fs.existsSync(legacyPath)?JSON.parse(fs.readFileSync(legacyPath,'utf8')):null;
+  await w.webContents.executeJavaScript('('+start.toString()+')('+port+','+JSON.stringify(legacy)+')');
   frame({_tag:'Chunk',values:[{event:{type:'node.updated',threadId:'thread-a',payload:{id:'root-a2',threadId:'thread-a',kind:'root_turn'}}},{event:{type:'provider-turn.updated',threadId:'thread-a',payload:{id:'a2',nodeId:'root-a2',status:'completed',tokenUsage:{usedTokens:134400,maxTokens:200000,updatedAt:new Date().toISOString()}}}}]});
-  await w.webContents.executeJavaScript('('+finish.toString()+')('+port+')');
-  console.log('Electron integration passed: native CSP/preload, blank/first-turn weather, opaque band, real WebSocket/HTTP, delta, native AI handoff, persistent review, installed/built-in editing, live toggle and cleanup.');
+  if(legacy){
+    await w.webContents.executeJavaScript('('+weatherUpgradeFinish.toString()+')()');
+    console.log('Electron integration passed: old installed weather upgrades, empty/first-turn placeholders hidden, history preserved, second-turn delta appears.');
+  }else{
+    await w.webContents.executeJavaScript('('+finish.toString()+')('+port+')');
+    console.log('Electron integration passed: native CSP/preload, blank/first-turn weather, opaque band, real WebSocket/HTTP, delta, native AI handoff, persistent review, installed/built-in editing, live toggle and cleanup.');
+  }
   connection?.destroy();server.close();app.quit();
 }).catch(e=>{console.error(e.stack);connection?.destroy();server.close();app.exit(1)});
 setTimeout(()=>{console.error('Integration timeout');app.exit(1)},30000).unref();
 
-async function start(port){
+async function start(port,legacy){
   const wait=async(f,label)=>{const end=Date.now()+7000;while(!f()){if(Date.now()>end)throw Error(label);await new Promise(r=>setTimeout(r,25));}};
   await wait(()=>window.__modsForT3Code,'host boot');
   if(!window.__nativePreload||typeof require!=='undefined')throw Error('Native preload/isolation changed');
-  await window.__modsForT3Code.importCandidate(window.__MODS_FOR_T3_OPTIONS__.examples.find(x=>x.manifest.id==='token-weather'));
+  if(legacy){
+    await window.__modsForT3Code.dispose();
+    const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('mods-for-t3-code-v1');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});
+    await new Promise((resolve,reject)=>{const t=db.transaction(['mods','data'],'readwrite');t.objectStore('mods').put({...legacy,enabled:true,quarantined:null});t.objectStore('data').put({history:{version:1,threads:[['unrelated-thread',[['saved',42000]]]]},sentinel:'Keep my data'},'token-weather');t.oncomplete=resolve;t.onerror=()=>reject(t.error)});
+    await window.__fixtureRemount();
+    await wait(()=>window.__modsForT3Code,'upgraded host boot');
+    const stored=await new Promise((resolve,reject)=>{const r=db.transaction('mods').objectStore('mods').get('token-weather');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});
+    if(stored.code!==window.__MODS_FOR_T3_OPTIONS__.examples.find(x=>x.manifest.id==='token-weather').code||!stored.enabled)throw Error('Legacy installed bundle was not upgraded');
+    const data=await new Promise((resolve,reject)=>{const r=db.transaction('data').objectStore('data').get('token-weather');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});
+    if(data.sentinel!=='Keep my data'||data.history.threads[0][1][0][1]!==42000)throw Error('Upgrade changed private data');
+    db.close();window.__modsForT3Code.open('installed');
+  }else await window.__modsForT3Code.importCandidate(window.__MODS_FOR_T3_OPTIONS__.examples.find(x=>x.manifest.id==='token-weather'));
   const sh=document.getElementById('mods-for-t3-code-host').shadowRoot;
-  [...sh.querySelectorAll('button')].find(x=>x.textContent==='Install mod').click();
+  if(!legacy)[...sh.querySelectorAll('button')].find(x=>x.textContent==='Install mod').click();
   await wait(()=>sh.querySelector('[aria-label="Enable Token weather"]')?.checked,'auto-enable');
   const band=()=>document.querySelector('[data-t3mods="bands"]')?.shadowRoot.querySelector('.band');
   await wait(()=>sh.querySelector('[data-mod="token-weather"] [data-state="active"]'),'weather ready without usage');
@@ -52,6 +70,13 @@ async function start(port){
   if(getComputedStyle(stack).backgroundColor!==getComputedStyle(document.body).backgroundColor)throw Error('Weather strip does not mask conversation text');
   const strip=stack.getBoundingClientRect(),stash=document.querySelector('[data-slot="composer-banner-attachment"]>div').getBoundingClientRect();
   if(strip.right>stash.left)throw Error('Weather strip covers Stash');
+}
+async function weatherUpgradeFinish(){
+  const end=Date.now()+7000;
+  const band=()=>document.querySelector('[data-t3mods="bands"]')?.shadowRoot.querySelector('.band');
+  while(!band()?.textContent.includes('▲ +98.3k last turn')){if(Date.now()>end)throw Error('Upgraded weather did not show the second-turn delta');await new Promise(r=>setTimeout(r,25));}
+  if(/unknown|first turn/.test(band().textContent))throw Error('Upgraded weather still shows a placeholder');
+  await window.__modsForT3Code.dispose();
 }
 async function finish(port){
   const wait=async(f,label)=>{const end=Date.now()+7000;while(!f()){if(Date.now()>end)throw Error(label);await new Promise(r=>setTimeout(r,25));}};

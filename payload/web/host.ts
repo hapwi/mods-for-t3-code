@@ -2,6 +2,7 @@ import type { BandPart, ModBundle, ModRecord } from "../../sdk.d.ts";
 import type { ModArtifact, ModArtifactApi, TelemetryApi } from "../telemetry-types.ts";
 import { MAX_BUNDLE_BYTES, PERMISSIONS, usageSnapshot, validateBundle } from "./manifest.ts";
 import { database } from "./database.ts";
+import { updateLegacyWeather } from "./builtin-updates.ts";
 import type { PendingRecord, PendingSource } from "./database.ts";
 import { ModRuntime } from "./runtime.ts";
 import { MODS_ICON, attachSidebarButton, composer, dockAboveComposer, dockContextControl, insertDraft, readDraft, sidebarFooter } from "./adapter.ts";
@@ -455,6 +456,14 @@ export async function mount(options: MountOptions): Promise<void> {
   function broadcast(): void { channel?.postMessage("refresh"); }
   async function reload(): Promise<void> {
     records = await database.list();
+    for (let index = 0; index < records.length; index++) {
+      const record = records[index];
+      const updated = await updateLegacyWeather(record, options.examples ?? []);
+      if (updated === record) continue;
+      await database.save(updated);
+      records[index] = updated;
+      log(updated.manifest.name, "Updated the built-in to hide empty-context and first-turn placeholders.");
+    }
     paused = Boolean(await database.getSetting("paused"));
     pending = await loadPending();
     const reviewing = review?.entry;
