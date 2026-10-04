@@ -22,7 +22,7 @@ app.whenReady().then(async()=>{
   await w.webContents.executeJavaScript('('+start.toString()+')('+port+')');
   frame({_tag:'Chunk',values:[{event:{type:'node.updated',threadId:'thread-a',payload:{id:'root-a2',threadId:'thread-a',kind:'root_turn'}}},{event:{type:'provider-turn.updated',threadId:'thread-a',payload:{id:'a2',nodeId:'root-a2',status:'completed',tokenUsage:{usedTokens:134400,maxTokens:200000,updatedAt:new Date().toISOString()}}}}]});
   await w.webContents.executeJavaScript('('+finish.toString()+')('+port+')');
-  console.log('Electron integration passed: native CSP/preload, real WebSocket/HTTP, weather/chart/delta, built-in state, native AI handoff, persistent review, live toggle and cleanup.');
+  console.log('Electron integration passed: native CSP/preload, blank/first-turn weather, opaque band, real WebSocket/HTTP, chart/delta, native AI handoff, persistent review, installed/built-in editing, live toggle and cleanup.');
   connection?.destroy();server.close();app.quit();
 }).catch(e=>{console.error(e.stack);connection?.destroy();server.close();app.exit(1)});
 setTimeout(()=>{console.error('Integration timeout');app.exit(1)},30000).unref();
@@ -31,20 +31,27 @@ async function start(port){
   const wait=async(f,label)=>{const end=Date.now()+7000;while(!f()){if(Date.now()>end)throw Error(label);await new Promise(r=>setTimeout(r,25));}};
   await wait(()=>window.__modsForT3Code,'host boot');
   if(!window.__nativePreload||typeof require!=='undefined')throw Error('Native preload/isolation changed');
-  window.__fixtureSocket=new WebSocket('ws://127.0.0.1:'+port);
-  await wait(()=>window.__T3_MODS_TELEMETRY__.get()?.usedTokens===36100,'hash-route snapshot');
   await window.__modsForT3Code.importCandidate(window.__MODS_FOR_T3_OPTIONS__.examples.find(x=>x.manifest.id==='token-weather'));
   const sh=document.getElementById('mods-for-t3-code-host').shadowRoot;
   [...sh.querySelectorAll('button')].find(x=>x.textContent==='Install mod').click();
   await wait(()=>sh.querySelector('[aria-label="Enable Token weather"]')?.checked,'auto-enable');
   const band=()=>document.querySelector('[data-t3mods="bands"]')?.shadowRoot.querySelector('.band');
+  await wait(()=>sh.querySelector('[data-mod="token-weather"] [data-state="active"]'),'weather ready without usage');
+  if(band())throw Error('Blank conversation shows a weather placeholder');
+  window.__fixtureSocket=new WebSocket('ws://127.0.0.1:'+port);
+  await wait(()=>window.__T3_MODS_TELEMETRY__.get()?.usedTokens===36100,'hash-route snapshot');
   await wait(()=>band()?.textContent.includes('36.1k / 200k'),'real worker display');
+  if(/unknown|first turn|last turn|Δ/.test(band().textContent))throw Error('First measured turn shows a delta placeholder');
   window.__modsForT3Code.open('examples');
   await wait(()=>sh.querySelector('[aria-label="Enable Token weather"]')?.checked,'built-in reflects installation');
   await wait(()=>sh.querySelector('[data-mod="token-weather"] [data-state="active"]'),'built-in active state');
   sh.querySelector('dialog').close();
   const r=document.querySelector('[data-t3mods="bands"]').getBoundingClientRect(),s=document.querySelector('[data-chat-composer-main-surface]').getBoundingClientRect();
-  if(Math.abs(s.top-r.bottom-6)>2||r.height>24)throw Error('Band spacing: '+JSON.stringify({gap:s.top-r.bottom,height:r.height}));
+  if(Math.abs(s.top-r.bottom)>2||r.height>24)throw Error('Band spacing: '+JSON.stringify({gap:s.top-r.bottom,height:r.height}));
+  const stack=document.querySelector('[data-t3mods="bands"]').shadowRoot.querySelector('.band-stack');
+  if(getComputedStyle(stack).backgroundColor!==getComputedStyle(document.body).backgroundColor)throw Error('Weather strip does not mask conversation text');
+  const strip=stack.getBoundingClientRect(),stash=document.querySelector('[data-slot="composer-banner-attachment"]>div').getBoundingClientRect();
+  if(strip.right>stash.left)throw Error('Weather strip covers Stash');
 }
 async function finish(port){
   const wait=async(f,label)=>{const end=Date.now()+7000;while(!f()){if(Date.now()>end)throw Error(label);await new Promise(r=>setTimeout(r,25));}};
@@ -58,7 +65,7 @@ async function finish(port){
   if(!band().textContent.includes('☇ Storm'))throw Error('New thread weather');
   location.hash='/settings/appearance';
   await wait(()=>document.querySelector('[data-t3mods="settings-section"]'),'hash Settings entry');
-  await wait(()=>band()?.textContent.includes('Context usage unavailable'),'Settings clears usage');
+  await wait(()=>!band(),'Settings clears weather without a placeholder');
   location.hash='/local/thread-c';
   const cache=await new Promise((resolve,reject)=>{const r=indexedDB.open('t3code:connection-runtime',4);r.onupgradeneeded=()=>r.result.createObjectStore('thread');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});
   const projection={thread:{id:'thread-c'},nodes:[{id:'root-c1',threadId:'thread-c',kind:'root_turn'}],providerTurns:[{id:'c1',nodeId:'root-c1',status:'completed',tokenUsage:{usedTokens:172000,maxTokens:258400,updatedAt:new Date().toISOString()}}]};
@@ -90,5 +97,30 @@ async function finish(port){
   await wait(()=>!document.querySelector('[data-t3mods="bands"]')?.shadowRoot.textContent.includes('Custom mod works'),'live disable');
   await wait(()=>!enabled()?.disabled,'toggle ready');enabled().click();
   await wait(()=>document.querySelector('[data-t3mods="bands"]')?.shadowRoot.textContent.includes('Custom mod works'),'live re-enable');
+  // Edits draft the existing code into the native paste path without submitting.
+  const editor=document.querySelector('[data-testid="composer-editor"]');
+  editor.addEventListener('paste',event=>{event.preventDefault();editor.textContent=event.clipboardData.getData('text/plain');});
+  const editRow=(selector)=>{sh.querySelector(selector+' button[aria-label^="More actions"]').click();[...sh.querySelectorAll('[role="menuitem"]')].find(x=>x.textContent==='Edit').click();};
+  const draftChange=async(name,text)=>{
+    const field=sh.querySelector('[aria-label="Changes for '+name+'"]');field.value=text;field.dispatchEvent(new Event('input',{bubbles:true}));
+    [...sh.querySelectorAll('button')].find(x=>x.textContent==='Draft in T3').click();
+    await wait(()=>editor.textContent.includes('What I want changed: '+text),'edit request reaches composer');
+  };
+  window.__modsForT3Code.open('installed');editRow('[data-mod="custom-counter"]');
+  [...sh.querySelectorAll('button')].find(x=>x.textContent==='Draft in T3').click();
+  await wait(()=>sh.querySelector('[role="alert"]')?.textContent.includes('Describe what should change'),'edit validates empty changes');
+  await draftChange('Custom counter','Also show a short greeting');
+  if(!editor.textContent.includes('Custom mod works')||!editor.textContent.includes('"custom-counter"')||!editor.textContent.includes('higher SemVer'))throw Error('Edit request lacks installed source or update contract');
+  if(!document.querySelector('[data-t3mods="bands"]')?.shadowRoot.textContent.includes('Custom mod works'))throw Error('Editing stopped the installed mod');
+  window.__modsForT3Code.open('examples');editRow('[data-example="prompt-kit"]');
+  await draftChange('Prompt kit','Add a review prompt');
+  if(!editor.textContent.includes('not installed yet')||!editor.textContent.includes('api.commands.register'))throw Error('Uninstalled built-in is not editable');
+  const original=window.__MODS_FOR_T3_OPTIONS__.examples.find(x=>x.manifest.id==='token-weather');
+  await window.__modsForT3Code.importCandidate({...original,manifest:{...original.manifest,version:'1.1.0'},code:original.code+'\n// Installed customization'});
+  [...sh.querySelectorAll('button')].find(x=>x.textContent==='Update mod').click();
+  await wait(()=>sh.querySelector('[data-mod="token-weather"] [data-state="active"]'),'customized builtin active');
+  window.__modsForT3Code.open('examples');editRow('[data-example="token-weather"]');
+  await draftChange('Token weather','Use shorter weather names');
+  if(!editor.textContent.includes('Installed customization')||!editor.textContent.includes('version 1.1.0'))throw Error('Built-in edit lost installed customization');
   await window.__modsForT3Code.dispose();if(document.querySelector('iframe')||document.querySelector('[data-t3mods="bands"]'))throw Error('Cleanup');
 }

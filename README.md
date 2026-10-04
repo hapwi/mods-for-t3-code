@@ -20,7 +20,7 @@ Windows, in PowerShell:
 irm https://raw.githubusercontent.com/hapwi/mods-for-t3-code/main/install.ps1 | iex
 ```
 
-The installer downloads a commit-pinned copy of this repository and uses the committed runtime bundle. If necessary it downloads its own Node 24 runtime and verifies the official SHA-256 checksum. The macOS confirmation reads from `/dev/tty`, so it also works when the script is piped into `sh`. Without an interactive terminal, an open app is left untouched and the installer asks you to close it first. No global npm install is needed. It patches T3 at its installed path and keeps a complete original backup; it does not create another app or require a different shortcut.
+The installer downloads a commit-pinned archive temporarily and retains only the compiled runtime, maintenance CLI, package metadata, and license. End users need no repository checkout or source files. If necessary it downloads its own Node 24 runtime and verifies the official SHA-256 checksum. The macOS confirmation reads from `/dev/tty`, so it also works when the script is piped into `sh`. Without an interactive terminal, an open app is left untouched and the installer asks you to close it first. No global npm install is needed. It patches T3 at its installed path and keeps a complete original backup; it does not create another app or require a different shortcut.
 
 For an unusual location, download the installer and pass an explicit path:
 
@@ -50,6 +50,7 @@ Open the puzzle icon at the bottom of T3’s sidebar, or **Settings → Mods**.
 - **Installed:** generated mods appear under **Waiting for review**, which survives closing the manager or restarting T3. Review source and permissions, then install to switch the mod on immediately. Rows show Starting, Active, Stopped, Off, Paused, or Safe mode; stopped mods offer Retry and Ask AI to fix. Inspect, export, and remove actions are in the ⋯ menu.
 - **Create:** describe a mod and put the generated authoring prompt into the current T3 composer. Choose your already logged-in provider/model and send it normally. The agent returns a manifest and JavaScript in two tagged code blocks. The manager reads the finished native response and lists the mod for review, including remote workspaces and replies outside the visible conversation. A local inbox is also watched. Invalid bundles show a reason and an Ask AI to fix action. No separate AI account or API key is required. The prompt includes T3’s supported surfaces, theme conventions, live lifecycle, and handling for missing context data.
 - **Import:** choose a `.t3mod` file or paste a complete bundle or the two tagged blocks from a reply. Validation errors stay beside the input.
+- **Edit:** open the ⋯ menu on an installed or built-in mod, choose Edit, and describe the changes. Draft in T3 includes its current source and the mod API in your existing chat. Send the request normally and review the returned update. Installed built-ins use your customized copy as the starting point.
 - **Development mode:** automatically apply inbox changes to an enabled mod with the same author and no additional permissions. Expanded permissions always require review.
 - **Activity:** inspect mod errors and quarantine reasons. **Pause all** stops every mod immediately.
 
@@ -63,9 +64,9 @@ A compact, colored line above the prompt shows the measured context percentage, 
 ☂ Showers  67%  134.4k / 200k  ▁▂▃▄▅▆  ▲ +98.3k last turn
 ```
 
-Weather thresholds are Clear below 25%, Cloudy below 50%, Showers below 75%, Storm below 90%, and Compact soon at 90% or higher. Measurements refresh as T3 reports them; history advances on completed turns. Compaction can produce a negative change.
+Weather thresholds are Clear below 25%, Cloudy below 50%, Showers below 75%, Storm below 90%, and Compact soon at 90% or higher. Measurements refresh as T3 reports them; history advances on completed turns. The turn delta appears once two completed turns have been measured. Compaction can produce a negative change.
 
-Counts come from T3’s normalized provider usage reports, including warm thread-cache hydration, not text-length estimates or account rate limits. Providers and older T3 versions may omit context measurements or window size; the mod explicitly shows an unavailable state. History is separate for each thread.
+Counts come from T3’s normalized provider usage reports, including warm thread-cache hydration, not text-length estimates or account rate limits. The band stays hidden until a measurement exists. If a provider supplies usage without the window size, it shows measured tokens and a window-unknown note. History is separate for each thread.
 
 ## Updates and recovery
 
@@ -88,7 +89,13 @@ Use that command with `doctor`, `safe-mode on`, `safe-mode off`, or `uninstall`.
 
 `T3_MODS_DISABLE=1` bypasses the host on launch. Safe mode loads the manager without running any mod code. For immediate recovery in a running app, use **Pause all**.
 
-The patched macOS app is ad-hoc signed. macOS may require renewed app permissions or Keychain access, which can affect existing provider sign-ins. Local signing can also affect [Squirrel automatic updates](https://www.electronjs.org/docs/latest/tutorial/code-signing); that native update path is not verified. If it fails, install the official T3 update at the same path and rerun this installer. Windows’s modified executable loses its publisher signature. The complete original signed app is backed up for restoration. The installer does not turn off Gatekeeper, Electron’s sandbox, ASAR validation, or security fuses.
+The patched macOS app is ad-hoc signed. macOS may require renewed app permissions or Keychain access, which can affect existing provider sign-ins. Local signing can also interfere with [Squirrel automatic updates](https://www.electronjs.org/docs/latest/api/auto-updater); normal updates while the patch is installed are not verified. If T3 reports an update installation error, close T3 and run the maintenance tool with `prepare-update`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/hapwi/mods-for-t3-code/main/install.sh | sh -s -- --prepare-update
+```
+
+The curl recovery command downloads the current maintenance tool without reinstalling the patch. If that tool is already current, you can run it directly with `prepare-update`. It restores the verified original vendor-signed app at its existing path, preserves private mod data, and refuses to overwrite an upstream replacement. Reopen T3 with its normal icon and update through T3. Rerun the installer afterward to restore Mods. This is recovery, not seamless native update compatibility; the patch does not change update feeds or bypass signature checks. Windows’s modified executable also loses its publisher signature. The complete original signed app is backed up for restoration. The installer does not turn off Gatekeeper, Electron’s sandbox, ASAR validation, or security fuses.
 
 ## Build and share a mod
 

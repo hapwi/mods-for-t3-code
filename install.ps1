@@ -36,7 +36,14 @@ try {
   Invoke-WebRequest "https://codeload.github.com/$repository/zip/$revision" -OutFile $zip
   Expand-Archive $zip -DestinationPath $work
   $tool = Join-Path $tools "package-$revision"
-  if (!(Test-Path $tool)) { Move-Item (Join-Path $work "mods-for-t3-code-$revision") $tool }
+  if (!(Test-Path $tool)) {
+    $source = Join-Path $work "mods-for-t3-code-$revision"
+    $runtimePackage = Join-Path $work 'runtime-package'
+    New-Item -ItemType Directory -Path $runtimePackage | Out-Null
+    Copy-Item (Join-Path $source 'dist') -Destination $runtimePackage -Recurse
+    Copy-Item (Join-Path $source 'package.json'), (Join-Path $source 'LICENSE') -Destination $runtimePackage
+    Move-Item $runtimePackage $tool
+  }
   $cli = Join-Path $tool 'dist/cli.mjs'
   if ($T3Directory) { & $node $cli install --windows-dir $T3Directory } else { & $node $cli install }
   if ($LASTEXITCODE -ne 0) { throw 'The patch was not installed. Any failed replacement is rolled back.' }

@@ -1,12 +1,54 @@
+import type { ModBundle } from "../../sdk.d.ts";
+
 export function authorPrompt(description: string, inbox?: string): string {
-  const destination = inbox || "the current workspace";
   return `Create a mod for Mods for T3 Code (API version 1).
 
 What I want: ${description}
 
 Use my existing T3 provider session. Do not change T3 itself. Nothing runs until I review the mod in the Mods manager and choose Install.
 
-How to hand the mod back:
+${contract(inbox, "After the two blocks, tell me in plain words what the mod does and which permissions to review.")}`;
+}
+
+/** The mod an edit request starts from: the installed copy when there is one, otherwise the included built-in. */
+export interface EditSource { bundle: ModBundle; installed: boolean; builtIn: boolean }
+
+// A fence longer than any backtick run inside, so quoted source cannot close it early.
+function quote(info: string, text: string): string {
+  const fence = "`".repeat(Math.max(3, ...[...text.matchAll(/`+/g)].map(([run]) => run.length + 1)));
+  return `${fence}${info}\n${text}\n${fence}`;
+}
+
+// Asks for an edited version of an existing mod: same id and author, higher version, back through review.
+export function editPrompt(change: string, source: EditSource, inbox?: string): string {
+  const { bundle: { manifest, code }, installed, builtIn } = source;
+  const [major = 0, minor = 0] = /^(\d+)\.(\d+)\.\d+/.exec(manifest.version)?.slice(1).map(Number) ?? [];
+  const origin = installed
+    ? builtIn ? "This is my installed copy of a built-in mod, including any changes made to it since. Edit this code, not the original built-in sample." : "This is the version I have installed."
+    : "This is a built-in mod included with Mods for T3 Code. It is not installed yet; send an edited variant I can install instead of the original.";
+  return `Edit a mod for Mods for T3 Code (API version 1).
+
+Mod: "${manifest.name}" (id ${manifest.id}, version ${manifest.version}, author ${manifest.author}). ${origin}
+
+What I want changed: ${change}
+
+Start from the complete current manifest and code below. Keep the id "${manifest.id}" and the author "${manifest.author}" exactly, and give it a higher SemVer version than ${manifest.version}, for example ${major}.${minor + 1}.0. Keep every existing feature and behavior I did not ask to change, and keep the name and description unless the change calls for new ones. Add a permission only when the change needs it. Send the complete updated mod, not a diff or only the changed parts.
+
+Current manifest:
+${quote("json", JSON.stringify(manifest, null, 2))}
+
+Current code:
+${quote("javascript", code)}
+
+Use my existing T3 provider session. Do not change T3 itself. Nothing changes until I review the edited mod in the Mods manager and choose ${installed ? "Update mod; until then the installed version keeps running" : "Install mod"}.
+
+${contract(inbox, "After the two blocks, tell me in plain words what you changed and any new permissions to review.")}`;
+}
+
+// Hand-back format and the full T3 SDK contract, shared by new mods and edits.
+function contract(inbox: string | undefined, closing: string): string {
+  const destination = inbox || "the current workspace";
+  return `How to hand the mod back:
 Your finished reply must contain exactly two fenced code blocks, in this order, with nothing else inside them:
 
 \`\`\`t3mod-manifest
@@ -32,7 +74,7 @@ T3 integration and design contract:
 This is a mod inside the existing T3 Code Electron app, written for the Mods for T3 Code API below. It is not a Claude Code plugin or Claude Code mod: T3 runs Claude through the Agent SDK, which does not render Claude Code mod UI inside T3. Do not use the plugin-authoring skill, plugin.json, hooks.json, register.js, register(), on(), ui.render, $.ui, tool.call or tool.check hooks, or any other Claude Code mods API, and do not write files under ~/.claude. T3 already owns the sidebar, Settings, thread list, conversation, composer, provider picker, and attachment drawer. Use the supported host surfaces below; do not rebuild T3, inject an overlay, invent DOM selectors, or assume a Claude Code terminal plugin API. Mods are workers, so document/window/React and T3's internal stores are unavailable. The host places and styles your output to match the current T3 theme.
 For a compact live indicator above the prompt use ui.band, with short plain text and semantic tones. Do not add a title panel or a second composer for a one-line indicator. For interactive actions use ui.panels or ui.commands. For themes use paired ui.theme tokens, including sidebar tokens when needed, instead of CSS or hardcoded layout. Keep labels concise, avoid decorative headings and redundant controls, and let the host choose fonts, spacing, borders, and light/dark colors.
 Install starts the mod immediately after permission review. It must work without restarting T3, update while the app stays open, and clean up its own timers when disabled. Treat navigation as a change of thread: do not display a previous thread's measurements on the next thread. Cache history by threadId, deduplicate completed turns by turnId, and preserve it with storage only if requested.
-Context measurements come from T3's actual provider-turn reports and cached thread projections. They are context-window usage, not subscription limits, cumulative billing totals, or a text-length estimate. A provider may return no measurement yet, and maxTokens may be unknown. Handle both states with a short muted message; never guess a 200k window, percentage, turn delta, or chart sample. Do not infer a token count from the model's name. Subscribe to both session.usage and turn.complete, and read api.session.usage() on activation. A completed turn may receive a corrected measurement later. Live indicators should render real data as soon as it arrives.
+Context measurements come from T3's actual provider-turn reports and cached thread projections. They are context-window usage, not subscription limits, cumulative billing totals, or a text-length estimate. A provider may return no measurement yet (for example in a blank conversation); prefer hiding a live context band with api.band.clear() until a measurement exists, rather than showing a placeholder. maxTokens may be unknown; show that with a short muted note. Omit a turn delta until two completed turns have been measured instead of showing an unknown placeholder; never guess a 200k window, percentage, turn delta, or chart sample. Do not infer a token count from the model's name. Subscribe to both session.usage and turn.complete, and read api.session.usage() on activation. A completed turn may receive a corrected measurement later. Live indicators should render real data as soon as it arrives.
 
 Mod code:
 The t3mod-code block is complete JavaScript, runs in an isolated browser worker, and must set globalThis.T3Mod.activate. No imports, DOM, Node, filesystem, network, credentials, tool approval, or model calls are available. A mod cannot intercept, block, rewrite, or approve tool calls, prompts, permission requests, or model requests, and it cannot replace T3's own interface; only the surfaces listed below exist. Declare only the permissions you need:
@@ -49,7 +91,7 @@ The t3mod-code block is complete JavaScript, runs in an isolated browser worker,
 - api.log("message") is always available.
 activate may return a cleanup function. All actions should finish within 5 seconds. Timers are fine. Long loops cause quarantine. Never request permissions outside this list.
 
-Before you answer, check the JavaScript syntax and that the manifest is valid JSON, without executing host API calls outside T3. Walk through activation, missing data, unknown window size, navigation, repeated completion events, disable, and re-enable. Do not claim a live T3 check you did not perform. After the two blocks, tell me in plain words what the mod does and which permissions to review.`;
+Before you answer, check the JavaScript syntax and that the manifest is valid JSON, without executing host API calls outside T3. Walk through activation, missing data, unknown window size, navigation, repeated completion events, disable, and re-enable. Do not claim a live T3 check you did not perform. ${closing}`;
 }
 
 // Asks the same chat for a corrected bundle when one fails validation or stops while running.

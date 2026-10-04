@@ -429,20 +429,153 @@ async function uninstallAppImage() {
 // src/platform.ts
 import { cp, mkdir as mkdir3, readFile as readFile4, writeFile as writeFile4, rename as rename3, rm as rm3, readdir as readdir3 } from "node:fs/promises";
 import { createHash as createHash3 } from "node:crypto";
-import { platform as platform3, homedir as homedir2 } from "node:os";
-import path4 from "node:path";
+import { platform as platform4, homedir as homedir2 } from "node:os";
+import path5 from "node:path";
 
 // src/mac-install.ts
-import { lstat, mkdir as mkdir2, open as open2, readdir as readdir2, readFile as readFile2, realpath as realpath2, rename as rename2, rm as rm2, writeFile as writeFile2 } from "node:fs/promises";
+import { lstat, mkdir as mkdir2, open as open3, readdir as readdir2, readFile as readFile2, realpath as realpath2, rename as rename2, rm as rm2, writeFile as writeFile2 } from "node:fs/promises";
+import { execFile as execFile2 } from "node:child_process";
+import { promisify as promisify2 } from "node:util";
+import { createHash as createHash2, randomBytes } from "node:crypto";
+import { platform as platform3 } from "node:os";
+import path4 from "node:path";
+
+// src/mac-session.ts
+import { open as open2 } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { createHash as createHash2, randomBytes } from "node:crypto";
 import { platform as platform2 } from "node:os";
 import path3 from "node:path";
-var marker2 = "/* mods-for-t3-code:v1 */";
 var execute = promisify(execFile);
-var recordPath = path3.join(dataRoot2, "mac-install.json");
-var backupsRoot = path3.join(dataRoot2, "backups");
+var pause = (milliseconds) => new Promise((resolve) => {
+  setTimeout(resolve, milliseconds);
+});
+function appPids(processList, appPath) {
+  const prefix = `${path3.resolve(appPath)}/Contents/MacOS/`;
+  return processList.split("\n").flatMap((line) => {
+    const match = line.match(/^\s*(\d+)\s+(.+)$/);
+    return match?.[2]?.startsWith(prefix) && !match[2].slice(prefix.length).includes("/") ? [Number(match[1])] : [];
+  });
+}
+function createProgress(output = process.stderr) {
+  const animated = Boolean(output.isTTY) && process.env.TERM !== "dumb";
+  const frames = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
+  let timer;
+  let label;
+  let index = 0;
+  const clear = () => {
+    clearInterval(timer);
+    timer = void 0;
+    if (animated && label) output.write("\r\x1B[2K");
+  };
+  return {
+    stage(message) {
+      if (message === label) return;
+      if (label) {
+        clear();
+        output.write(`  \u2713 ${label}
+`);
+      }
+      label = message;
+      if (!animated) {
+        output.write(`  \u2192 ${message}
+`);
+        return;
+      }
+      const draw = () => {
+        output.write(`\r\x1B[2K  ${frames[index % frames.length] ?? "\u280B"} ${label}`);
+        index += 1;
+      };
+      draw();
+      timer = setInterval(draw, 90);
+      timer.unref();
+    },
+    finish(success = true) {
+      clear();
+      if (label && animated) output.write(`  ${success ? "\u2713" : "\xD7"} ${label}
+`);
+      label = void 0;
+    }
+  };
+}
+async function confirmInTerminal(message) {
+  let terminal;
+  try {
+    terminal = await open2("/dev/tty", "r+");
+  } catch {
+    throw new Error("T3 is open. Close it and rerun the installer in a terminal; no app files have been changed.");
+  }
+  try {
+    await terminal.write(message);
+    const byte = Buffer.alloc(1);
+    let answer = "";
+    while (answer.length < 128) {
+      const { bytesRead } = await terminal.read(byte, 0, 1, null);
+      if (!bytesRead || byte[0] === 10 || byte[0] === 13) break;
+      answer += byte.toString();
+    }
+    return /^(y|yes)$/i.test(answer.trim());
+  } finally {
+    await terminal.close();
+  }
+}
+async function withMacAppClosed(appPath, work, options = {}) {
+  if ((options.hostPlatform ?? platform2()) !== "darwin") throw new Error("macOS installation must run on macOS.");
+  const run = options.run ?? execute;
+  const confirm = options.confirm ?? confirmInTerminal;
+  const sleep = options.sleep ?? pause;
+  const progress = options.progress ?? createProgress();
+  const running = async () => appPids((await run("/bin/ps", ["-axo", "pid=,comm="])).stdout, appPath).length > 0;
+  const wasOpen = await running();
+  let closed = false;
+  let successful = false;
+  if (wasOpen) {
+    const name = path3.basename(appPath, ".app");
+    if (!await confirm(`
+${name} is open. Close it and install Mods? [y/N] `)) throw new Error("Installation cancelled. T3 and your app files were left unchanged.");
+    progress.stage("Closing T3 normally");
+    const quoted = appPath.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+    try {
+      await run("/usr/bin/osascript", ["-e", `tell application "${quoted}" to quit`]);
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        if (!await running()) {
+          closed = true;
+          break;
+        }
+        await sleep(250);
+      }
+      if (!closed) throw new Error("T3 is still open. Finish any save or confirmation dialog, close T3, then rerun the installer.");
+    } catch (error) {
+      progress.finish(false);
+      throw error;
+    }
+  }
+  try {
+    progress.stage("Checking the installed T3 app");
+    const result = await work((message) => progress.stage(message));
+    successful = true;
+    progress.finish();
+    return result;
+  } finally {
+    if (!successful) progress.finish(false);
+    if (closed) {
+      try {
+        await run("/usr/bin/open", [appPath]);
+        process.stderr.write("\nReopened your existing T3 app.\n");
+      } catch (error) {
+        process.stderr.write(`
+Reopen T3 using its normal icon: ${failureText(error)}
+`);
+      }
+    }
+  }
+}
+
+// src/mac-install.ts
+var marker2 = "/* mods-for-t3-code:v1 */";
+var execute2 = promisify2(execFile2);
+var recordPath = path4.join(dataRoot2, "mac-install.json");
+var backupsRoot = path4.join(dataRoot2, "backups");
 var backupPattern = /^mac-[a-f0-9]{16}\.app$/;
 var managedCopyPattern = /^managed-darwin-[a-f0-9]{16}\.app$/;
 var machoMagics = /* @__PURE__ */ new Set([4277009102, 4277009103, 3405691582, 3472551422, 3489328638, 3199925962]);
@@ -564,7 +697,7 @@ function macOpenArguments(installedApp, args2 = []) {
   return args2.length ? [installedApp, "--args", ...args2] : [installedApp];
 }
 function relocatedSidecarState(state, archive) {
-  const target = path3.resolve(archive);
+  const target = path4.resolve(archive);
   return { ...state, archive: target, backup: `${target}.mods-for-t3-code.bak` };
 }
 function macInstallPlan({ hasRecord, sameApp, liveHash, recordedPatchedHash, sidecarPatchedHash, recognized, markerFree }) {
@@ -580,32 +713,38 @@ function macRestorePlan({ liveHash, recordedPatchedHash, backupHash, recordedOri
   if (liveHash !== recordedPatchedHash && recognized && markerFree) return "keep-update";
   return "refuse";
 }
+function macNativeUpdatePreparationPlan(input) {
+  const plan = macRestorePlan(input);
+  if (plan !== "restore") return plan;
+  if (input.backupAdhoc || !input.vendorCdHash || !input.backupCdHash || input.backupCdHash !== input.vendorCdHash) return "refuse";
+  return "restore";
+}
 function resolveMacInstallTarget(requested, legacy, root = dataRoot2) {
-  const resolved = path3.resolve(requested);
+  const resolved = path4.resolve(requested);
   if (!legacy?.original) return resolved;
-  const base = path3.basename(resolved);
-  if (path3.dirname(resolved) === path3.resolve(root) && managedCopyPattern.test(base)) return path3.resolve(legacy.original);
+  const base = path4.basename(resolved);
+  if (path4.dirname(resolved) === path4.resolve(root) && managedCopyPattern.test(base)) return path4.resolve(legacy.original);
   return resolved;
 }
 function assertMac(options = {}) {
-  if ((options.hostPlatform ?? platform2()) !== "darwin") throw new Error("macOS installation must run on macOS.");
+  if ((options.hostPlatform ?? platform3()) !== "darwin") throw new Error("macOS installation must run on macOS.");
 }
 function isInside(child, parent) {
-  const resolved = path3.resolve(child);
-  const root = path3.resolve(parent);
-  return resolved === root || resolved.startsWith(`${root}${path3.sep}`);
+  const resolved = path4.resolve(child);
+  const root = path4.resolve(parent);
+  return resolved === root || resolved.startsWith(`${root}${path4.sep}`);
 }
 function backupPath(originalHash) {
-  return path3.join(backupsRoot, `mac-${originalHash.slice(0, 16)}.app`);
+  return path4.join(backupsRoot, `mac-${originalHash.slice(0, 16)}.app`);
 }
 function ownedBackupOrNull(candidate) {
   if (!candidate || typeof candidate !== "string") return null;
-  const resolved = path3.resolve(candidate);
-  if (path3.dirname(resolved) !== path3.resolve(backupsRoot) || !backupPattern.test(path3.basename(resolved))) return null;
+  const resolved = path4.resolve(candidate);
+  if (path4.dirname(resolved) !== path4.resolve(backupsRoot) || !backupPattern.test(path4.basename(resolved))) return null;
   return resolved;
 }
 function sidecarPaths(archive) {
-  const target = path3.resolve(archive);
+  const target = path4.resolve(archive);
   return { archive: target, backup: `${target}.mods-for-t3-code.bak`, stateFile: `${target}.mods-for-t3-code.json` };
 }
 function commandFailure(error) {
@@ -616,12 +755,12 @@ function commandFailure(error) {
 }
 async function defaultRunner(binary, args2) {
   try {
-    const { stdout, stderr } = await execute(binary, args2, { maxBuffer: 32 * 1024 * 1024 });
+    const { stdout, stderr } = await execute2(binary, args2, { maxBuffer: 32 * 1024 * 1024 });
     return { stdout: String(stdout ?? ""), stderr: String(stderr ?? "") };
   } catch (error) {
     const failed = commandFailure(error);
     const detail = (failed.stderr || failed.stdout).trim();
-    const wrapped = new Error(detail ? `${path3.basename(binary)} failed: ${detail}` : failed.message);
+    const wrapped = new Error(detail ? `${path4.basename(binary)} failed: ${detail}` : failed.message);
     wrapped.stdout = failed.stdout;
     wrapped.stderr = failed.stderr;
     throw wrapped;
@@ -638,14 +777,14 @@ function withUpdater(record) {
 }
 function assertRecord(record) {
   if (!record || record.kind !== "darwin" || record.patchedInPlace !== true) throw new Error("Invalid macOS installation record.");
-  const installedApp = path3.resolve(record.installedApp || record.original || "");
-  const archive = path3.resolve(record.archive || "");
-  const executable = path3.resolve(record.executable || "");
-  const bundleBackup = path3.resolve(record.bundleBackup || "");
+  const installedApp = path4.resolve(record.installedApp || record.original || "");
+  const archive = path4.resolve(record.archive || "");
+  const executable = path4.resolve(record.executable || "");
+  const bundleBackup = path4.resolve(record.bundleBackup || "");
   if (!installedApp.endsWith(".app")) throw new Error("Invalid macOS installation record.");
-  if (archive !== path3.join(installedApp, "Contents", "Resources", "app.asar")) throw new Error("Invalid macOS installation record.");
-  if (path3.dirname(executable) !== path3.join(installedApp, "Contents", "MacOS")) throw new Error("Invalid macOS installation record.");
-  if (record.original && path3.resolve(record.original) !== installedApp) throw new Error("Invalid macOS installation record.");
+  if (archive !== path4.join(installedApp, "Contents", "Resources", "app.asar")) throw new Error("Invalid macOS installation record.");
+  if (path4.dirname(executable) !== path4.join(installedApp, "Contents", "MacOS")) throw new Error("Invalid macOS installation record.");
+  if (record.original && path4.resolve(record.original) !== installedApp) throw new Error("Invalid macOS installation record.");
   if (!ownedBackupOrNull(bundleBackup)) throw new Error("Invalid macOS installation record.");
   if (!/^[a-f0-9]{64}$/.test(record.originalHash || "") || !/^[a-f0-9]{64}$/.test(record.patchedHash || "")) throw new Error("Invalid macOS installation record.");
   if (record.signature !== "adhoc") throw new Error("Invalid macOS installation record.");
@@ -685,7 +824,7 @@ async function writeRecord(record) {
 }
 async function withLock(work) {
   await mkdir2(dataRoot2, { recursive: true, mode: 448 });
-  const lock = path3.join(dataRoot2, "mac-install.lock");
+  const lock = path4.join(dataRoot2, "mac-install.lock");
   await mkdir2(lock).catch(() => {
     throw new Error("Another macOS patch operation is active. If it crashed, remove the mac-install.lock directory in the mods data folder.");
   });
@@ -696,7 +835,7 @@ async function withLock(work) {
   }
 }
 async function isMachO(file) {
-  const handle = await open2(file, "r");
+  const handle = await open3(file, "r");
   try {
     const header = Buffer.alloc(4);
     const { bytesRead } = await handle.read(header, 0, 4, 0);
@@ -720,7 +859,7 @@ async function inspectArchive2(archive) {
   }
 }
 async function legacyDarwin() {
-  const filename = path3.join(dataRoot2, "platform.json");
+  const filename = path4.join(dataRoot2, "platform.json");
   if (!await exists(filename)) return null;
   try {
     const record = JSON.parse(await readFile2(filename, "utf8"));
@@ -739,7 +878,7 @@ async function assertInstallLocation(installedApp) {
   }
   if (info.isSymbolicLink()) throw new Error("Refusing to patch a symlinked macOS app.");
   if (!info.isDirectory()) throw new Error("Choose the T3 .app bundle.");
-  if (path3.basename(installedApp).includes(".mods-stage-") || path3.basename(path3.dirname(installedApp)).includes(".mods-")) {
+  if (path4.basename(installedApp).includes(".mods-stage-") || path4.basename(path4.dirname(installedApp)).includes(".mods-")) {
     throw new Error("Choose the installed T3 app, not a temporary staging copy.");
   }
   const real = await realpath2(installedApp);
@@ -770,7 +909,7 @@ async function dittoBundle(source, destination, options) {
 async function ensureBackup(installedApp, originalHash, options) {
   await mkdir2(backupsRoot, { recursive: true, mode: 448 });
   const destination = backupPath(originalHash);
-  const archived = path3.join(destination, "Contents", "Resources", "app.asar");
+  const archived = path4.join(destination, "Contents", "Resources", "app.asar");
   if (await exists(destination)) {
     if (await sha256(archived) !== originalHash) throw new Error(`Backup already exists at ${destination}. It will not be overwritten.`);
     const signed = await signatureDetails(destination, options);
@@ -778,10 +917,10 @@ async function ensureBackup(installedApp, originalHash, options) {
     if (signed.cdhash !== source.cdhash) throw new Error("The saved backup signature does not match the installed app.");
     return { bundleBackup: destination, vendorCdHash: signed.cdhash, vendorSignature: signed.authority[0] || signed.label };
   }
-  const temporary = path3.join(backupsRoot, `.mac-${originalHash.slice(0, 16)}-${process.pid}-${randomBytes(3).toString("hex")}.app`);
+  const temporary = path4.join(backupsRoot, `.mac-${originalHash.slice(0, 16)}-${process.pid}-${randomBytes(3).toString("hex")}.app`);
   try {
     await dittoBundle(installedApp, temporary, options);
-    if (await sha256(path3.join(temporary, "Contents", "Resources", "app.asar")) !== originalHash) throw new Error("The macOS backup does not match the installed archive.");
+    if (await sha256(path4.join(temporary, "Contents", "Resources", "app.asar")) !== originalHash) throw new Error("The macOS backup does not match the installed archive.");
     const source = await signatureDetails(installedApp, options);
     const copied = await signatureDetails(temporary, options);
     if (!source.cdhash || source.cdhash !== copied.cdhash) throw new Error("The macOS backup signature does not match the installed app.");
@@ -794,9 +933,9 @@ async function ensureBackup(installedApp, originalHash, options) {
   }
 }
 async function commitInstalledBundle(target, replacement) {
-  const parent = path3.dirname(path3.resolve(target));
-  if (path3.dirname(path3.resolve(replacement)) !== parent) throw new Error("The staged macOS app must stay in the same directory as the installed app.");
-  const holding = path3.join(parent, `.${path3.basename(target)}.mods-hold-${process.pid}-${randomBytes(4).toString("hex")}`);
+  const parent = path4.dirname(path4.resolve(target));
+  if (path4.dirname(path4.resolve(replacement)) !== parent) throw new Error("The staged macOS app must stay in the same directory as the installed app.");
+  const holding = path4.join(parent, `.${path4.basename(target)}.mods-hold-${process.pid}-${randomBytes(4).toString("hex")}`);
   await rename2(target, holding);
   try {
     await rename2(replacement, target);
@@ -813,8 +952,8 @@ async function commitInstalledBundle(target, replacement) {
   return holding;
 }
 async function rollbackCommit(target, holding) {
-  const parent = path3.dirname(target);
-  const failed = path3.join(parent, `.${path3.basename(target)}.mods-failed-${process.pid}-${randomBytes(3).toString("hex")}`);
+  const parent = path4.dirname(target);
+  const failed = path4.join(parent, `.${path4.basename(target)}.mods-failed-${process.pid}-${randomBytes(3).toString("hex")}`);
   if (await exists(target)) await rename2(target, failed);
   try {
     await rename2(holding, target);
@@ -865,7 +1004,7 @@ async function signAdHoc(app, entitlementsXml, options) {
   const keys = entitlementKeys(sanitized);
   if (keys.some((key) => isRestrictedEntitlement(key))) throw new Error("Restricted entitlements were still present after sanitizing.");
   for (const key of requiredEntitlements) if (!keys.includes(key)) throw new Error(`Sanitized entitlements are missing ${key}.`);
-  const entitlementsFile = path3.join(dataRoot2, `.entitlements-${process.pid}-${randomBytes(4).toString("hex")}.plist`);
+  const entitlementsFile = path4.join(dataRoot2, `.entitlements-${process.pid}-${randomBytes(4).toString("hex")}.plist`);
   await writeFile2(entitlementsFile, sanitized, { mode: 384 });
   try {
     const targets = [];
@@ -873,7 +1012,7 @@ async function signAdHoc(app, entitlementsXml, options) {
       const entries = await readdir2(directory, { withFileTypes: true });
       for (const entry2 of entries) {
         if (entry2.isSymbolicLink()) continue;
-        const full = path3.join(directory, entry2.name);
+        const full = path4.join(directory, entry2.name);
         if (entry2.isDirectory()) {
           await visit(full);
           if (full !== app && /\.(app|framework|xpc|appex)$/i.test(entry2.name)) targets.push(full);
@@ -909,7 +1048,7 @@ async function normalizeStagedSidecar(stagedArchive, finalArchive, originalHash)
 }
 async function retireLegacyManagedCopy(installedApp) {
   const legacy = await legacyDarwin();
-  if (!legacy || path3.resolve(legacy.original) !== path3.resolve(installedApp)) return false;
+  if (!legacy || path4.resolve(legacy.original) !== path4.resolve(installedApp)) return false;
   let pending = false;
   for (const candidate of [legacy.previousCopy, legacy.copy]) {
     if (!candidate) continue;
@@ -921,7 +1060,7 @@ async function retireLegacyManagedCopy(installedApp) {
       console.warn(`Older managed copy was left in place: ${failureText(error)}`);
     }
   }
-  if (!pending) await rm2(path3.join(dataRoot2, "platform.json"), { force: true });
+  if (!pending) await rm2(path4.join(dataRoot2, "platform.json"), { force: true });
   return !pending;
 }
 async function removeOwnedBackup(candidate, retain = []) {
@@ -933,8 +1072,8 @@ async function removeOwnedBackup(candidate, retain = []) {
 }
 async function restoreInterruptedInstall(installedApp) {
   if (await exists(installedApp)) return;
-  const parent = path3.dirname(installedApp);
-  const prefix = `.${path3.basename(installedApp)}.mods-hold-`;
+  const parent = path4.dirname(installedApp);
+  const prefix = `.${path4.basename(installedApp)}.mods-hold-`;
   let names = [];
   try {
     names = (await readdir2(parent)).filter((name) => name.startsWith(prefix));
@@ -942,13 +1081,13 @@ async function restoreInterruptedInstall(installedApp) {
     return;
   }
   if (names.length !== 1) {
-    throw new Error(names.length ? `The macOS app is missing. The original was left at ${path3.join(parent, names[0])}.` : `T3 app not found at ${installedApp}.`);
+    throw new Error(names.length ? `The macOS app is missing. The original was left at ${path4.join(parent, names[0])}.` : `T3 app not found at ${installedApp}.`);
   }
-  await rename2(path3.join(parent, names[0]), installedApp);
+  await rename2(path4.join(parent, names[0]), installedApp);
 }
 async function removeLeftoverTemps(installedApp) {
-  const parent = path3.dirname(installedApp);
-  const prefix = `.${path3.basename(installedApp)}.mods-`;
+  const parent = path4.dirname(installedApp);
+  const prefix = `.${path4.basename(installedApp)}.mods-`;
   let names = [];
   try {
     names = await readdir2(parent);
@@ -958,7 +1097,7 @@ async function removeLeftoverTemps(installedApp) {
   for (const name of names) {
     if (!name.startsWith(prefix)) continue;
     if (name.includes(".mods-stage-") || name.includes(".mods-failed-") || name.includes(".mods-restore-")) {
-      await rm2(path3.join(parent, name), { recursive: true, force: true });
+      await rm2(path4.join(parent, name), { recursive: true, force: true });
     }
   }
 }
@@ -975,10 +1114,10 @@ async function finishCurrent(record) {
   return withUpdater({ ...record, alreadyPatched: true, adoptedUpdate: false });
 }
 async function patchIntoPlace(installedApp, originalHash, previousRecord, options) {
-  const parent = path3.dirname(installedApp);
+  const parent = path4.dirname(installedApp);
   const token = `${process.pid}-${randomBytes(4).toString("hex")}`;
-  const stage = path3.join(parent, `.${path3.basename(installedApp)}.mods-stage-${token}`);
-  const finalArchive = path3.join(installedApp, "Contents", "Resources", "app.asar");
+  const stage = path4.join(parent, `.${path4.basename(installedApp)}.mods-stage-${token}`);
+  const finalArchive = path4.join(installedApp, "Contents", "Resources", "app.asar");
   let holding = null;
   let committed = false;
   options.onProgress?.("Backing up the original T3 app");
@@ -986,7 +1125,7 @@ async function patchIntoPlace(installedApp, originalHash, previousRecord, option
   try {
     options.onProgress?.("Preparing the app patch");
     await dittoBundle(installedApp, stage, options);
-    const stagedArchive = path3.join(stage, "Contents", "Resources", "app.asar");
+    const stagedArchive = path4.join(stage, "Contents", "Resources", "app.asar");
     if (await sha256(stagedArchive) !== originalHash) throw new Error("The staged macOS archive does not match the installed app.");
     const listed = await runnerFor(options)("/usr/bin/codesign", ["-d", "--entitlements", ":-", stage]);
     const entitlementsXml = `${listed.stdout ?? ""}
@@ -995,10 +1134,10 @@ ${listed.stderr ?? ""}`;
     const patch = await patchArchive(stagedArchive, { managedCopy: true });
     if (patch.originalHash !== originalHash) throw new Error("The staged macOS archive does not match the backup.");
     const normalized = await normalizeStagedSidecar(stagedArchive, finalArchive, originalHash);
-    await applyAsarIntegrity(path3.join(stage, "Contents", "Info.plist"), stagedArchive, options);
-    await rm2(path3.join(stage, "Contents", "embedded.provisionprofile"), { force: true });
-    const executable = path3.join(installedApp, "Contents", "MacOS", await executableName(path3.join(stage, "Contents", "Info.plist"), options));
-    if (!await exists(path3.join(stage, "Contents", "MacOS", path3.basename(executable)))) throw new Error("The macOS T3 executable could not be identified.");
+    await applyAsarIntegrity(path4.join(stage, "Contents", "Info.plist"), stagedArchive, options);
+    await rm2(path4.join(stage, "Contents", "embedded.provisionprofile"), { force: true });
+    const executable = path4.join(installedApp, "Contents", "MacOS", await executableName(path4.join(stage, "Contents", "Info.plist"), options));
+    if (!await exists(path4.join(stage, "Contents", "MacOS", path4.basename(executable)))) throw new Error("The macOS T3 executable could not be identified.");
     if (await sha256(finalArchive) !== originalHash) throw new Error("T3 changed while the patch was being prepared. The installed app was left untouched.");
     options.onProgress?.("Signing and verifying the patched app");
     await clearSigningDetritus(stage, options);
@@ -1054,7 +1193,7 @@ async function installLocked(appPath, options) {
   await restoreInterruptedInstall(installedApp);
   await assertInstallLocation(installedApp);
   await removeLeftoverTemps(installedApp);
-  const archive = path3.join(installedApp, "Contents", "Resources", "app.asar");
+  const archive = path4.join(installedApp, "Contents", "Resources", "app.asar");
   if (!await exists(archive)) throw new Error("Choose the T3 .app bundle containing Contents/Resources/app.asar.");
   const liveHash = await sha256(archive);
   const inspection = await inspectArchive2(archive);
@@ -1088,15 +1227,15 @@ async function installLocked(appPath, options) {
     return finishCurrent(record);
   }
   if (action === "record-missing") {
-    if (!sidecar?.originalHash || path3.resolve(sidecar.archive || "") !== archive) {
+    if (!sidecar?.originalHash || path4.resolve(sidecar.archive || "") !== archive) {
       throw new Error("The archive is patched but its backup record is missing. Restore the original app before patching again.");
     }
     const bundleBackup = backupPath(sidecar.originalHash);
-    const backupArchive = path3.join(bundleBackup, "Contents", "Resources", "app.asar");
+    const backupArchive = path4.join(bundleBackup, "Contents", "Resources", "app.asar");
     if (!await exists(backupArchive) || await sha256(backupArchive) !== sidecar.originalHash) {
       throw new Error("The archive is patched but its original backup is missing. Restore the original app before patching again.");
     }
-    const executable = path3.join(installedApp, "Contents", "MacOS", await executableName(path3.join(installedApp, "Contents", "Info.plist"), options));
+    const executable = path4.join(installedApp, "Contents", "MacOS", await executableName(path4.join(installedApp, "Contents", "Info.plist"), options));
     const restored = await writeRecord({
       kind: "darwin",
       installedApp,
@@ -1153,13 +1292,13 @@ Opening the installed T3 app with mods disabled.`);
   return withUpdater({ ...current, reapplied });
 }
 async function restoreInstalledApp(record, options) {
-  const parent = path3.dirname(record.installedApp);
-  const stage = path3.join(parent, `.${path3.basename(record.installedApp)}.mods-restore-${process.pid}-${randomBytes(4).toString("hex")}`);
+  const parent = path4.dirname(record.installedApp);
+  const stage = path4.join(parent, `.${path4.basename(record.installedApp)}.mods-restore-${process.pid}-${randomBytes(4).toString("hex")}`);
   let holding = null;
   let committed = false;
   try {
     await dittoBundle(record.bundleBackup, stage, options);
-    if (await sha256(path3.join(stage, "Contents", "Resources", "app.asar")) !== record.originalHash) throw new Error("The backup checksum no longer matches. Restore refused.");
+    if (await sha256(path4.join(stage, "Contents", "Resources", "app.asar")) !== record.originalHash) throw new Error("The backup checksum no longer matches. Restore refused.");
     const backupSignature = await signatureDetails(stage, options);
     if (record.vendorCdHash && backupSignature.cdhash !== record.vendorCdHash) throw new Error("The backup signature does not match the saved vendor app. Restore refused.");
     holding = await commitInstalledBundle(record.installedApp, stage);
@@ -1203,7 +1342,7 @@ async function uninstallMacApp(options = {}) {
     await restoreInterruptedInstall(record.installedApp);
     const liveHash = await sha256(record.archive);
     const inspection = await inspectArchive2(record.archive);
-    const backupArchive = path3.join(record.bundleBackup, "Contents", "Resources", "app.asar");
+    const backupArchive = path4.join(record.bundleBackup, "Contents", "Resources", "app.asar");
     const backupHash = await exists(backupArchive) ? await sha256(backupArchive) : null;
     const plan = macRestorePlan({
       liveHash,
@@ -1233,6 +1372,102 @@ async function uninstallMacApp(options = {}) {
       throw new Error(liveHash === record.patchedHash ? "The backup checksum no longer matches. Restore refused." : "The app changed after patching. Restore would overwrite an update, so it has been refused.");
     }
     return restoreInstalledApp(record, options);
+  });
+}
+async function assertMacAppNotRunning(installedApp, options) {
+  if (options.assertClosed) {
+    await options.assertClosed(installedApp);
+    return;
+  }
+  const listed = await runnerFor(options)("/bin/ps", ["-axo", "pid=,comm="]);
+  if (appPids(`${listed.stdout ?? ""}
+${listed.stderr ?? ""}`, installedApp).length > 0) {
+    throw new Error("T3 is open. Close it before preparing the native update. No app files have been changed.");
+  }
+}
+function preparationRefusal(liveHash, record, basePlan) {
+  if (basePlan === "restore") return new Error("The saved backup is not a verified vendor-signed app. Native update preparation refused.");
+  if (liveHash === record.patchedHash) return new Error("The backup checksum no longer matches. Restore refused.");
+  return new Error("The app changed after patching. Restore would overwrite an update, so it has been refused.");
+}
+async function prepareMacNativeUpdate(options = {}) {
+  assertMac(options);
+  return withLock(async () => {
+    const record = await readRecord();
+    if (!record) throw new Error("No macOS installation record found.");
+    await assertMacAppNotRunning(record.installedApp, options);
+    await restoreInterruptedInstall(record.installedApp);
+    const liveHash = await sha256(record.archive);
+    const inspection = await inspectArchive2(record.archive);
+    const backupArchive = path4.join(record.bundleBackup, "Contents", "Resources", "app.asar");
+    const backupHash = await exists(backupArchive) ? await sha256(backupArchive) : null;
+    const basePlan = macRestorePlan({
+      liveHash,
+      recordedPatchedHash: record.patchedHash,
+      backupHash,
+      recordedOriginalHash: record.originalHash,
+      recognized: inspection.recognized,
+      markerFree: inspection.markerFree
+    });
+    let backupAdhoc = true;
+    let backupCdHash = null;
+    if (basePlan === "restore") {
+      const signed = await signatureDetails(record.bundleBackup, options);
+      backupAdhoc = signed.adhoc;
+      backupCdHash = signed.cdhash;
+    }
+    const plan = macNativeUpdatePreparationPlan({
+      liveHash,
+      recordedPatchedHash: record.patchedHash,
+      backupHash,
+      recordedOriginalHash: record.originalHash,
+      recognized: inspection.recognized,
+      markerFree: inspection.markerFree,
+      backupAdhoc,
+      backupCdHash,
+      vendorCdHash: record.vendorCdHash
+    });
+    switch (plan) {
+      case "keep-update":
+        return withUpdater({
+          action: "kept-update",
+          prepared: true,
+          restored: false,
+          keptUpdate: true,
+          installedApp: record.installedApp,
+          original: record.installedApp,
+          archive: record.archive,
+          executable: record.executable,
+          appVersion: inspection.version || record.appVersion,
+          patchedInPlace: true,
+          signature: record.signature
+        });
+      case "refuse":
+        throw preparationRefusal(liveHash, record, basePlan);
+      case "restore": {
+        options.onProgress?.("Restoring the verified original signed app");
+        const restored = await restoreInstalledApp(record, options);
+        return {
+          action: "restored-vendor",
+          prepared: true,
+          restored: true,
+          keptUpdate: false,
+          installedApp: restored.installedApp,
+          original: restored.original,
+          archive: restored.archive,
+          executable: restored.executable,
+          appVersion: restored.appVersion,
+          patchedInPlace: true,
+          signature: restored.signature,
+          updaterEnabled: true,
+          nativeUpdaterVerified: false
+        };
+      }
+      default: {
+        const unreachable = plan;
+        throw new Error(`Unexpected native update preparation: ${String(unreachable)}`);
+      }
+    }
   });
 }
 async function doctorMacApp(options = {}) {
@@ -1267,7 +1502,7 @@ async function doctorMacApp(options = {}) {
 // src/windows-resources.ts
 import { readFile as readFile3, writeFile as writeFile3 } from "node:fs/promises";
 
-// node_modules/pe-library/dist/format/FormatBase.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/FormatBase.js
 var FormatBase = (
   /** @class */
   (function() {
@@ -1289,7 +1524,7 @@ var FormatBase = (
 );
 var FormatBase_default = FormatBase;
 
-// node_modules/pe-library/dist/format/ArrayFormatBase.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/ArrayFormatBase.js
 var __extends = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -1359,7 +1594,7 @@ if (typeof Symbol !== "undefined") {
 }
 var ArrayFormatBase_default = ArrayFormatBase;
 
-// node_modules/pe-library/dist/format/ImageDataDirectoryArray.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/ImageDataDirectoryArray.js
 var __extends2 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -1421,7 +1656,7 @@ var ImageDataDirectoryArray = (
 );
 var ImageDataDirectoryArray_default = ImageDataDirectoryArray;
 
-// node_modules/pe-library/dist/format/ImageDirectoryEntry.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/ImageDirectoryEntry.js
 var ImageDirectoryEntry = {
   Export: 0,
   Import: 1,
@@ -1446,7 +1681,7 @@ var ImageDirectoryEntry = {
 };
 var ImageDirectoryEntry_default = ImageDirectoryEntry;
 
-// node_modules/pe-library/dist/util/functions.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/util/functions.js
 function cloneObject(object) {
   var r = {};
   Object.keys(object).forEach(function(key) {
@@ -1675,7 +1910,7 @@ function stringToBinary(string) {
   }
 }
 
-// node_modules/pe-library/dist/format/ImageDosHeader.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/ImageDosHeader.js
 var __extends3 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -1890,7 +2125,7 @@ var ImageDosHeader = (
 );
 var ImageDosHeader_default = ImageDosHeader;
 
-// node_modules/pe-library/dist/format/ImageFileHeader.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/ImageFileHeader.js
 var __extends4 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -1999,7 +2234,7 @@ var ImageFileHeader = (
 );
 var ImageFileHeader_default = ImageFileHeader;
 
-// node_modules/pe-library/dist/format/ImageOptionalHeader.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/ImageOptionalHeader.js
 var __extends5 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -2339,7 +2574,7 @@ var ImageOptionalHeader = (
 );
 var ImageOptionalHeader_default = ImageOptionalHeader;
 
-// node_modules/pe-library/dist/format/ImageOptionalHeader64.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/ImageOptionalHeader64.js
 var __extends6 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -2739,7 +2974,7 @@ var ImageOptionalHeader64 = (
 );
 var ImageOptionalHeader64_default = ImageOptionalHeader64;
 
-// node_modules/pe-library/dist/format/ImageNtHeaders.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/ImageNtHeaders.js
 var __extends7 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -2841,7 +3076,7 @@ var ImageNtHeaders = (
 );
 var ImageNtHeaders_default = ImageNtHeaders;
 
-// node_modules/pe-library/dist/format/ImageSectionHeaderArray.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/format/ImageSectionHeaderArray.js
 var __extends8 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -2909,7 +3144,7 @@ var ImageSectionHeaderArray = (
 );
 var ImageSectionHeaderArray_default = ImageSectionHeaderArray;
 
-// node_modules/pe-library/dist/util/generate.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/util/generate.js
 var DOS_STUB_PROGRAM = new Uint8Array([
   14,
   31,
@@ -3035,7 +3270,7 @@ function makeEmptyNtExecutableBinary(is32Bit, isDLL) {
   return bin;
 }
 
-// node_modules/pe-library/dist/NtExecutable.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/NtExecutable.js
 var NtExecutable = (
   /** @class */
   (function() {
@@ -3360,7 +3595,7 @@ var NtExecutable = (
 );
 var NtExecutable_default = NtExecutable;
 
-// node_modules/pe-library/dist/NtExecutableResource.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/pe-library/dist/NtExecutableResource.js
 function removeDuplicates(a) {
   return a.reduce(function(p, c) {
     return p.indexOf(c) >= 0 ? p : p.concat(c);
@@ -3935,7 +4170,7 @@ var NtExecutableResource = (
 );
 var NtExecutableResource_default = NtExecutableResource;
 
-// node_modules/resedit/dist/util/functions.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/util/functions.js
 function cloneObject2(object) {
   var r = {};
   Object.keys(object).forEach(function(key) {
@@ -3985,7 +4220,7 @@ function readUint32WithLastOffset(view, offset, last) {
   return offset + 4 <= last ? view.getUint32(offset, true) : 0;
 }
 
-// node_modules/resedit/dist/data/IconItem.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/data/IconItem.js
 function calcMaskSize(width, height) {
   var actualWidthBytes = roundUp2(Math.abs(width), 32) / 8;
   return actualWidthBytes * Math.abs(height);
@@ -4139,7 +4374,7 @@ var IconItem = (
 );
 var IconItem_default = IconItem;
 
-// node_modules/resedit/dist/data/RawIconItem.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/data/RawIconItem.js
 var RawIconItem = (
   /** @class */
   (function() {
@@ -4169,7 +4404,7 @@ var RawIconItem = (
 );
 var RawIconItem_default = RawIconItem;
 
-// node_modules/resedit/dist/data/IconFile.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/data/IconFile.js
 function generateEntryBinary(icons) {
   var count = icons.length;
   if (count > 65535) {
@@ -4284,7 +4519,7 @@ var IconFile = (
   })()
 );
 
-// node_modules/resedit/dist/mui/MuiResourceInfo.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/mui/MuiResourceInfo.js
 function isValidMuiResourceEntry(resourceEntry) {
   var view = new DataView(resourceEntry.bin);
   if (view.getUint32(0, true) !== 4274912973) {
@@ -4611,7 +4846,7 @@ var MuiResourceInfo = (
   })()
 );
 
-// node_modules/resedit/dist/resource/VersionInfo.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/resource/VersionInfo.js
 function readStringToNullChar(view, offset, last) {
   var r = "";
   while (offset + 2 <= last) {
@@ -5256,7 +5491,7 @@ var VersionInfo = (
   })()
 );
 
-// node_modules/resedit/dist/resource/IconGroupEntry.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/resource/IconGroupEntry.js
 function generateEntryBinary2(icons) {
   var count = icons.length;
   if (count > 65535) {
@@ -5512,7 +5747,7 @@ var IconGroupEntry = (
   })()
 );
 
-// node_modules/resedit/dist/resource/StringTableItem.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/resource/StringTableItem.js
 var StringTableItem = (
   /** @class */
   (function() {
@@ -5585,7 +5820,7 @@ var StringTableItem = (
 );
 var StringTableItem_default = StringTableItem;
 
-// node_modules/resedit/dist/resource/StringTable.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/resource/StringTable.js
 var StringTable = (
   /** @class */
   (function() {
@@ -5693,7 +5928,7 @@ var StringTable = (
   })()
 );
 
-// node_modules/resedit/dist/sign/data/DERObject.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/DERObject.js
 var RawDERObject = (
   /** @class */
   (function() {
@@ -5707,7 +5942,7 @@ var RawDERObject = (
   })()
 );
 
-// node_modules/resedit/dist/sign/data/derUtil.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/derUtil.js
 function makeDERLength(length) {
   if (length < 128) {
     return [length];
@@ -5764,7 +5999,7 @@ function arrayToDERSet(items) {
   return [49].concat(makeDERLength(r.length)).concat(r);
 }
 
-// node_modules/resedit/dist/sign/data/ObjectIdentifier.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/ObjectIdentifier.js
 var ObjectIdentifier = (
   /** @class */
   (function() {
@@ -5808,7 +6043,7 @@ var ObjectIdentifier = (
 );
 var ObjectIdentifier_default = ObjectIdentifier;
 
-// node_modules/resedit/dist/sign/data/KnownOids.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/KnownOids.js
 var OID_SHA1_NO_SIGN = new ObjectIdentifier_default([1, 3, 14, 3, 2, 26]);
 var OID_SHA256_NO_SIGN = new ObjectIdentifier_default([2, 16, 840, 1, 101, 3, 4, 2, 1]);
 var OID_SHA384_NO_SIGN = new ObjectIdentifier_default([2, 16, 840, 1, 101, 3, 4, 2, 2]);
@@ -5832,7 +6067,7 @@ var OID_SPC_SP_OPUS_INFO_OBJID = new ObjectIdentifier_default([1, 3, 6, 1, 4, 1,
 var OID_SPC_INDIVIDUAL_SP_KEY_PURPOSE_OBJID = new ObjectIdentifier_default([1, 3, 6, 1, 4, 1, 311, 2, 1, 21]);
 var OID_RFC3161_COUNTER_SIGNATURE = new ObjectIdentifier_default([1, 3, 6, 1, 4, 1, 311, 3, 3, 1]);
 
-// node_modules/resedit/dist/sign/data/AlgorithmIdentifier.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/AlgorithmIdentifier.js
 var AlgorithmIdentifier = (
   /** @class */
   (function() {
@@ -5850,7 +6085,7 @@ var AlgorithmIdentifier = (
   })()
 );
 
-// node_modules/resedit/dist/sign/data/Attribute.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/Attribute.js
 var Attribute = (
   /** @class */
   (function() {
@@ -5865,7 +6100,7 @@ var Attribute = (
   })()
 );
 
-// node_modules/resedit/dist/sign/data/ContentInfo.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/ContentInfo.js
 var ContentInfo = (
   /** @class */
   (function() {
@@ -5881,7 +6116,7 @@ var ContentInfo = (
 );
 var ContentInfo_default = ContentInfo;
 
-// node_modules/resedit/dist/sign/data/CertificateDataRoot.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/CertificateDataRoot.js
 var __extends9 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -5912,7 +6147,7 @@ var CertificateDataRoot = (
   })(ContentInfo_default)
 );
 
-// node_modules/resedit/dist/sign/data/DigestInfo.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/DigestInfo.js
 var DigestInfo = (
   /** @class */
   (function() {
@@ -5935,7 +6170,7 @@ var DigestInfo = (
   })()
 );
 
-// node_modules/resedit/dist/sign/data/IssuerAndSerialNumber.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/IssuerAndSerialNumber.js
 var IssuerAndSerialNumber = (
   /** @class */
   (function() {
@@ -5950,7 +6185,7 @@ var IssuerAndSerialNumber = (
   })()
 );
 
-// node_modules/resedit/dist/sign/data/SignedData.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/SignedData.js
 var SignedData = (
   /** @class */
   (function() {
@@ -5979,7 +6214,7 @@ var SignedData = (
   })()
 );
 
-// node_modules/resedit/dist/sign/data/SignerInfo.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/SignerInfo.js
 var SignerInfo = (
   /** @class */
   (function() {
@@ -6011,7 +6246,7 @@ var SignerInfo = (
   })()
 );
 
-// node_modules/resedit/dist/sign/data/SpcIndirectDataContent.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/SpcIndirectDataContent.js
 var __extends10 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -6072,7 +6307,7 @@ var SpcIndirectDataContentInfo = (
   })(ContentInfo_default)
 );
 
-// node_modules/resedit/dist/sign/data/SpcLink.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/SpcLink.js
 var __extends11 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -6134,7 +6369,7 @@ var SpcLinkFile = (
   })(SpcLink)
 );
 
-// node_modules/resedit/dist/sign/data/SpcPeImageData.js
+// ../../home/hapwi/github/mods-for-t3-code/node_modules/resedit/dist/sign/data/SpcPeImageData.js
 var __extends12 = /* @__PURE__ */ (function() {
   var extendStatics = function(d, b) {
     extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
@@ -6195,8 +6430,8 @@ async function update(executable, digest) {
 }
 
 // src/platform.ts
-var recordPath2 = path4.join(dataRoot2, "platform.json");
-var macRecordPath = path4.join(dataRoot2, "mac-install.json");
+var recordPath2 = path5.join(dataRoot2, "platform.json");
+var macRecordPath = path5.join(dataRoot2, "mac-install.json");
 var managedCopyName = /^managed-(darwin|win32)-[a-f0-9]{16}(?:\.app)?$/;
 function nativeInstallChanged(record, liveHash) {
   return Boolean(liveHash) && liveHash !== (record.originalFingerprint ?? record.fingerprint);
@@ -6212,17 +6447,17 @@ async function windowsIntegrity(executable, archive) {
 }
 async function installPlatform(sourcePath, kind, options = {}) {
   if (kind === "darwin") return installMacApp(options.original ?? sourcePath);
-  if (kind !== platform3()) throw new Error(`${kind} installation must run on ${kind}.`);
-  const source = path4.resolve(sourcePath);
-  const original = path4.resolve(options.original ?? source);
-  const sourceArchive = path4.join(source, "resources", "app.asar");
+  if (kind !== platform4()) throw new Error(`${kind} installation must run on ${kind}.`);
+  const source = path5.resolve(sourcePath);
+  const original = path5.resolve(options.original ?? source);
+  const sourceArchive = path5.join(source, "resources", "app.asar");
   if (!await exists(sourceArchive)) throw new Error("Choose the Windows installation directory containing resources/app.asar.");
   const fingerprint = await sha256(sourceArchive);
   const originalFingerprint = options.originalFingerprint ?? fingerprint;
   const previous = await exists(recordPath2) ? JSON.parse(await readFile4(recordPath2, "utf8")) : null;
   if (previous && previous.fingerprint === fingerprint && await exists(previous.archive)) {
     await patchArchive(previous.archive, { managedCopy: true });
-    if (path4.resolve(previous.original) !== original || previous.originalFingerprint !== originalFingerprint) {
+    if (path5.resolve(previous.original) !== original || previous.originalFingerprint !== originalFingerprint) {
       const refreshed = { ...previous, original, originalFingerprint };
       await writeRecord2(refreshed);
       return refreshed;
@@ -6230,18 +6465,18 @@ async function installPlatform(sourcePath, kind, options = {}) {
     return previous;
   }
   await mkdir3(dataRoot2, { recursive: true, mode: 448 });
-  const copy = path4.join(dataRoot2, `managed-${kind}-${fingerprint.slice(0, 16)}`);
+  const copy = path5.join(dataRoot2, `managed-${kind}-${fingerprint.slice(0, 16)}`);
   if (await exists(copy)) throw new Error(`Managed copy already exists at ${copy}. It has not been overwritten.`);
   let record;
   try {
     await cp(source, copy, { recursive: true, preserveTimestamps: true, errorOnExist: true, force: false });
-    const archive = path4.join(copy, "resources", "app.asar");
+    const archive = path5.join(copy, "resources", "app.asar");
     const patch = await patchArchive(archive, { managedCopy: true });
     const files = (await readdir3(copy)).filter((name) => /^(?:T3[ -]?Code|t3code)\.exe$/i.test(name));
     if (files.length !== 1) throw new Error("The Windows T3 executable could not be identified.");
     const executableName2 = files[0];
     if (!executableName2) throw new Error("The Windows T3 executable could not be identified.");
-    const executable = path4.join(copy, executableName2);
+    const executable = path5.join(copy, executableName2);
     await windowsIntegrity(executable, archive);
     record = { kind, original, originalFingerprint, fingerprint, copy, archive, executable, appVersion: patch.appVersion, previousCopy: previous?.copy ?? null };
     await writeRecord2(record);
@@ -6264,7 +6499,7 @@ async function launchPlatform(args2 = []) {
     return launchMacApp(args2);
   }
   try {
-    const archive = path4.join(record.original, "resources", "app.asar");
+    const archive = path5.join(record.original, "resources", "app.asar");
     if (nativeInstallChanged(record, await sha256(archive))) {
       console.log("T3 updated. Refreshing its modded copy\u2026");
       record = await installPlatform(record.original, record.kind);
@@ -6274,8 +6509,8 @@ async function launchPlatform(args2 = []) {
   } catch (error) {
     console.warn(`Mod copy could not start: ${failureText(error)}
 Opening the original T3 app. Your mods are preserved.`);
-    const name = path4.basename(record.executable);
-    await command(path4.join(record.original, name), args2);
+    const name = path5.basename(record.executable);
+    await command(path5.join(record.original, name), args2);
   }
 }
 async function uninstallPlatform() {
@@ -6283,161 +6518,30 @@ async function uninstallPlatform() {
   const record = JSON.parse(await readFile4(recordPath2, "utf8"));
   for (const copy of [record.copy, record.previousCopy]) {
     if (!copy) continue;
-    if (path4.dirname(copy) !== dataRoot2 || !/^managed-(darwin|win32)-[a-f0-9]{16}(?:\.app)?$/.test(path4.basename(copy))) throw new Error("Invalid managed-copy record.");
+    if (path5.dirname(copy) !== dataRoot2 || !/^managed-(darwin|win32)-[a-f0-9]{16}(?:\.app)?$/.test(path5.basename(copy))) throw new Error("Invalid managed-copy record.");
     await rm3(copy, { recursive: true, force: true });
   }
   await rm3(recordPath2);
 }
-async function detectPlatform({ kind = platform3(), home = homedir2(), applications = "/Applications", localAppData = process.env.LOCALAPPDATA || home, programFiles = process.env.ProgramFiles || "C:\\Program Files" } = {}) {
+async function detectPlatform({ kind = platform4(), home = homedir2(), applications = "/Applications", localAppData = process.env.LOCALAPPDATA || home, programFiles = process.env.ProgramFiles || "C:\\Program Files" } = {}) {
   const names = ["T3 Code", "T3-Code", "T3Code", "T3", "T3 Code (Alpha)", "T3 Code (Nightly)", "T3 Code Nightly"];
   if (kind === "darwin") {
-    const directories = [applications, path4.join(home, "Applications")];
+    const directories = [applications, path5.join(home, "Applications")];
     for (const directory of directories) for (const name of names) {
-      const candidate = path4.join(directory, `${name}.app`);
-      if (await exists(path4.join(candidate, "Contents", "Resources", "app.asar"))) return candidate;
+      const candidate = path5.join(directory, `${name}.app`);
+      if (await exists(path5.join(candidate, "Contents", "Resources", "app.asar"))) return candidate;
     }
     throw new Error(`T3 was not found in ${directories.join(" or ")}. Pass --mac-app '/path/to/your T3.app' (including the full app name).`);
   }
   if (kind === "win32") {
-    const directories = [path4.join(localAppData, "Programs"), programFiles];
+    const directories = [path5.join(localAppData, "Programs"), programFiles];
     for (const directory of directories) for (const name of [...names, "t3-code", "t3code"]) {
-      const candidate = path4.join(directory, name);
-      if (await exists(path4.join(candidate, "resources", "app.asar"))) return candidate;
+      const candidate = path5.join(directory, name);
+      if (await exists(path5.join(candidate, "resources", "app.asar"))) return candidate;
     }
     throw new Error(`T3 was not found in ${directories.join(" or ")}. Pass --windows-dir 'C:\\path\\to\\your T3 installation'.`);
   }
   throw new Error(`Native installation detection is unsupported on ${kind}. On Linux use --appimage or --asar.`);
-}
-
-// src/mac-session.ts
-import { open as open3 } from "node:fs/promises";
-import { execFile as execFile2 } from "node:child_process";
-import { promisify as promisify2 } from "node:util";
-import { platform as platform4 } from "node:os";
-import path5 from "node:path";
-var execute2 = promisify2(execFile2);
-var pause = (milliseconds) => new Promise((resolve) => {
-  setTimeout(resolve, milliseconds);
-});
-function appPids(processList, appPath) {
-  const prefix = `${path5.resolve(appPath)}/Contents/MacOS/`;
-  return processList.split("\n").flatMap((line) => {
-    const match = line.match(/^\s*(\d+)\s+(.+)$/);
-    return match?.[2]?.startsWith(prefix) && !match[2].slice(prefix.length).includes("/") ? [Number(match[1])] : [];
-  });
-}
-function createProgress(output = process.stderr) {
-  const animated = Boolean(output.isTTY) && process.env.TERM !== "dumb";
-  const frames = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
-  let timer;
-  let label;
-  let index = 0;
-  const clear = () => {
-    clearInterval(timer);
-    timer = void 0;
-    if (animated && label) output.write("\r\x1B[2K");
-  };
-  return {
-    stage(message) {
-      if (message === label) return;
-      if (label) {
-        clear();
-        output.write(`  \u2713 ${label}
-`);
-      }
-      label = message;
-      if (!animated) {
-        output.write(`  \u2192 ${message}
-`);
-        return;
-      }
-      const draw = () => {
-        output.write(`\r\x1B[2K  ${frames[index % frames.length] ?? "\u280B"} ${label}`);
-        index += 1;
-      };
-      draw();
-      timer = setInterval(draw, 90);
-      timer.unref();
-    },
-    finish(success = true) {
-      clear();
-      if (label && animated) output.write(`  ${success ? "\u2713" : "\xD7"} ${label}
-`);
-      label = void 0;
-    }
-  };
-}
-async function confirmInTerminal(message) {
-  let terminal;
-  try {
-    terminal = await open3("/dev/tty", "r+");
-  } catch {
-    throw new Error("T3 is open. Close it and rerun the installer in a terminal; no app files have been changed.");
-  }
-  try {
-    await terminal.write(message);
-    const byte = Buffer.alloc(1);
-    let answer = "";
-    while (answer.length < 128) {
-      const { bytesRead } = await terminal.read(byte, 0, 1, null);
-      if (!bytesRead || byte[0] === 10 || byte[0] === 13) break;
-      answer += byte.toString();
-    }
-    return /^(y|yes)$/i.test(answer.trim());
-  } finally {
-    await terminal.close();
-  }
-}
-async function withMacAppClosed(appPath, work, options = {}) {
-  if ((options.hostPlatform ?? platform4()) !== "darwin") throw new Error("macOS installation must run on macOS.");
-  const run = options.run ?? execute2;
-  const confirm = options.confirm ?? confirmInTerminal;
-  const sleep = options.sleep ?? pause;
-  const progress = options.progress ?? createProgress();
-  const running = async () => appPids((await run("/bin/ps", ["-axo", "pid=,comm="])).stdout, appPath).length > 0;
-  const wasOpen = await running();
-  let closed = false;
-  let successful = false;
-  if (wasOpen) {
-    const name = path5.basename(appPath, ".app");
-    if (!await confirm(`
-${name} is open. Close it and install Mods? [y/N] `)) throw new Error("Installation cancelled. T3 and your app files were left unchanged.");
-    progress.stage("Closing T3 normally");
-    const quoted = appPath.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
-    try {
-      await run("/usr/bin/osascript", ["-e", `tell application "${quoted}" to quit`]);
-      for (let attempt = 0; attempt < 120; attempt += 1) {
-        if (!await running()) {
-          closed = true;
-          break;
-        }
-        await sleep(250);
-      }
-      if (!closed) throw new Error("T3 is still open. Finish any save or confirmation dialog, close T3, then rerun the installer.");
-    } catch (error) {
-      progress.finish(false);
-      throw error;
-    }
-  }
-  try {
-    progress.stage("Checking the installed T3 app");
-    const result = await work((message) => progress.stage(message));
-    successful = true;
-    progress.finish();
-    return result;
-  } finally {
-    if (!successful) progress.finish(false);
-    if (closed) {
-      try {
-        await run("/usr/bin/open", [appPath]);
-        process.stderr.write("\nReopened your existing T3 app.\n");
-      } catch (error) {
-        process.stderr.write(`
-Reopen T3 using its normal icon: ${failureText(error)}
-`);
-      }
-    }
-  }
 }
 
 // src/windows-install.ts
@@ -7173,12 +7277,13 @@ var help = `Mods for T3 Code
                                           Detect and patch an Electron install
   doctor  [--asar FILE]                    Check compatibility / patch checksums
   uninstall [--asar FILE]                  Restore your installed T3 app
+  prepare-update                           Restore the verified original signed macOS app so T3 can use its own updater
   launch [-- Electron flags]               Open existing T3; refresh after updates
   safe-mode on|off                         Turn all mod code off for next launch
   pack MOD_DIRECTORY [--out FILE]          Bundle a JS/TS mod for sharing
   validate FILE.t3mod                      Validate a bundle without executing it
 
-Close T3 before install or uninstall. One initial relaunch loads the host.
+Close T3 before install, uninstall, or prepare-update. One initial relaunch loads the host.
 Mod installation, creation, updates and toggles are then live.
 T3_MODS_DISABLE=1 bypasses the host entirely. Mod data lives in:
 ${dataRoot2}
@@ -7232,6 +7337,15 @@ Patching your existing app: ${app}`);
       await rm6(archiveRecord);
     } else throw new Error("No installation record found. For a direct archive use uninstall --asar FILE.");
     console.log("Patch removed. Your installed T3 app is restored and private mod data is preserved.");
+  } else if (command2 === "prepare-update") {
+    const result = await prepareMacNativeUpdate();
+    if (result.keptUpdate) {
+      console.log(`T3 at ${result.installedApp} is already an upstream build. The older backup was not restored over it.`);
+      console.log("Private mod data is unchanged. The maintenance launch command would reapply mods; open T3 with its normal icon and use T3's own updater first, then rerun install when you want mods again.");
+    } else {
+      console.log(`Restored the verified original signed app at ${result.installedApp}.`);
+      console.log("The app path is unchanged and private mod data is preserved. Reopen T3 with its normal icon and use T3's own updater. After that update, rerun install to reapply mods.");
+    }
   } else if (command2 === "launch") {
     const flags = args[0] === "--" ? args.slice(1) : args;
     if (await exists(path8.join(dataRoot2, "mac-install.json"))) await launchMacApp(flags);

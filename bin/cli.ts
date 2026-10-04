@@ -8,7 +8,7 @@ import { patchArchive, restoreArchive, detectInstallation, dataRoot, launchApp, 
 import { launchPlatform, uninstallPlatform, detectPlatform } from "../src/platform.ts";
 
 import { withMacAppClosed } from "../src/mac-session.ts";
-import { installMacApp, launchMacApp, uninstallMacApp, doctorMacApp } from "../src/mac-install.ts";
+import { installMacApp, launchMacApp, uninstallMacApp, doctorMacApp, prepareMacNativeUpdate } from "../src/mac-install.ts";
 import { installWindowsApp, launchWindowsApp, uninstallWindowsApp, doctorWindowsApp } from "../src/windows-install.ts";
 import { installInstalledAppImage, launchInstalledAppImage, uninstallInstalledAppImage, doctorInstalledAppImage } from "../src/appimage-install.ts";
 
@@ -31,12 +31,13 @@ const help = `Mods for T3 Code
                                           Detect and patch an Electron install
   doctor  [--asar FILE]                    Check compatibility / patch checksums
   uninstall [--asar FILE]                  Restore your installed T3 app
+  prepare-update                           Restore the verified original signed macOS app so T3 can use its own updater
   launch [-- Electron flags]               Open existing T3; refresh after updates
   safe-mode on|off                         Turn all mod code off for next launch
   pack MOD_DIRECTORY [--out FILE]          Bundle a JS/TS mod for sharing
   validate FILE.t3mod                      Validate a bundle without executing it
 
-Close T3 before install or uninstall. One initial relaunch loads the host.
+Close T3 before install, uninstall, or prepare-update. One initial relaunch loads the host.
 Mod installation, creation, updates and toggles are then live.
 T3_MODS_DISABLE=1 bypasses the host entirely. Mod data lives in:
 ${dataRoot}
@@ -85,6 +86,15 @@ try {
     else if (await exists(archiveRecord)) { await restoreArchive(JSON.parse(await readFile(archiveRecord, "utf8")).archive); await rm(archiveRecord); }
     else throw new Error("No installation record found. For a direct archive use uninstall --asar FILE.");
     console.log("Patch removed. Your installed T3 app is restored and private mod data is preserved.");
+  } else if (command === "prepare-update") {
+    const result = await prepareMacNativeUpdate();
+    if (result.keptUpdate) {
+      console.log(`T3 at ${result.installedApp} is already an upstream build. The older backup was not restored over it.`);
+      console.log("Private mod data is unchanged. The maintenance launch command would reapply mods; open T3 with its normal icon and use T3's own updater first, then rerun install when you want mods again.");
+    } else {
+      console.log(`Restored the verified original signed app at ${result.installedApp}.`);
+      console.log("The app path is unchanged and private mod data is preserved. Reopen T3 with its normal icon and use T3's own updater. After that update, rerun install to reapply mods.");
+    }
   } else if (command === "launch") {
     const flags = args[0] === "--" ? args.slice(1) : args;
     if (await exists(path.join(dataRoot, "mac-install.json"))) await launchMacApp(flags);

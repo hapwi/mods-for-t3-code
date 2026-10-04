@@ -18,6 +18,10 @@ Anthropic's [Claude Code mods](https://code.claude.com/docs/en/plugins/mods/over
 
 Native installers stage a patch and atomically replace the installed app at its existing path, keeping a complete original backup. macOS updates ASAR integrity metadata and signs locally with Electron entitlements, excluding vendor-only provisioning entitlements. Windows updates the executable’s ASAR integrity resource. AppImages retain the original ELF runtime and repack the modified filesystem. No integrity fuse is disabled. Modified applications lose their original publisher signature; uninstall restores the backed-up signed original when it still matches the installed version.
 
+The macOS `prepare-update` maintenance command is a closed-app recovery path. It requires the recorded patched archive hash, the original backup hash, and the saved non-ad-hoc code-directory hash before restoring the vendor bundle transactionally. It refuses while T3 is open and leaves clean upstream replacements untouched. Reopening the restored app lets T3 use its own updater; Mods must then be reapplied separately. This does not establish native updater compatibility for the locally signed patched process, and no signing validation or update feed is changed.
+
+End-user installer packages retain only `dist/`, package metadata, and the license. Source archives are temporary; mod creation uses the embedded SDK contract rather than a repository checkout.
+
 Maintenance launches detect clean upstream replacements and reapply the patch. Ordinary T3 launches use the existing app directly; automatic patch reapplication after an upstream replacement through that path is not yet implemented. Upstream updates are not blocked or redirected to another release channel.
 
 Automatic patch reapplication is distinct from automatic code repair. API-compatible mods keep working; failed mods are quarantined. The host does not silently ask an AI to rewrite executable mods, increase permissions, or obstruct upstream security updates.

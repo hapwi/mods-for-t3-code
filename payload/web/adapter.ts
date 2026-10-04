@@ -29,9 +29,10 @@ export function insertDraft(text: string): void {
 // [banner dock (attached banners, Stash tab), div.relative > main surface].
 // The band floats absolutely over the dock's empty left area, so it adds no
 // layout space and isn't affected by parent gaps; when the dock shows a
-// full-width banner it lifts above it. Builds without the main-surface marker
-// fall back to an in-flow line before the form. React can replace any of
-// these nodes; reattach when it does.
+// full-width banner it lifts above it. Its opaque strip (style.ts) reaches down
+// to the surface, so conversation scrolling behind the footer never shows
+// through. Builds without the main-surface marker fall back to an in-flow line
+// before the form. React can replace any of these nodes; reattach when it does.
 const FLOATING = { position: "absolute", left: "0", width: "auto", maxWidth: "none", margin: "0", zIndex: "30", pointerEvents: "none" };
 export function dockAboveComposer(element: HTMLElement): { show(value: boolean): void; dispose(): void } {
   let wanted = false;
@@ -54,7 +55,7 @@ export function dockAboveComposer(element: HTMLElement): { show(value: boolean):
     // A wide banner or anything on the left would sit under the band: go above the dock.
     if (parts.some((rect) => rect.width > box.width / 2 || rect.left < box.left + box.width / 2)) lift = Math.max(0, box.top - Math.min(...parts.map((rect) => rect.top)));
     else if (parts.length) reserve = Math.max(0, box.right - Math.min(...parts.map((rect) => rect.left)) + 8);
-    Object.assign(element.style, FLOATING, { right: `${reserve}px`, bottom: `calc(100% + ${lift + 6}px)` });
+    Object.assign(element.style, FLOATING, { right: `${reserve}px`, bottom: `calc(100% + ${lift}px)` });
   }
   function place(): void {
     frame = undefined;
@@ -68,7 +69,7 @@ export function dockAboveComposer(element: HTMLElement): { show(value: boolean):
       watch(main, dock); float(main, dock); return;
     }
     watch();
-    element.style.cssText = inFlow; element.style.marginBottom = "6px";
+    element.style.cssText = inFlow;
     const anchor = form ?? editor;
     if (!anchor.parentElement) { element.remove(); return; }
     if (element.nextElementSibling !== anchor) anchor.before(element);

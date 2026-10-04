@@ -63,16 +63,17 @@
     await wait(() => !shadow().querySelector('[aria-busy]') && shadow().textContent.includes("Installed and switched on."), "weather install");
     window.__modsForT3Code.open();
     assert(shadow().querySelector('input[aria-label="Enable Token weather"]').checked, "Weather automatically enabled");
-    await shows("Context usage unavailable", "explicit unavailable usage");
+    await wait(() => !band(), "no weather before a measurement");
     const form = document.querySelector("[data-chat-composer-form]");
-    assert(dock().nextElementSibling === form && !form.contains(dock()) && !document.querySelector('[data-testid="composer-editor"]').contains(dock()), "Band is above the composer and outside the editor");
     for (const [used, text, color] of [[40000, "☀ Clear", "yellow"], [50000, "☁ Cloudy", "cyan"], [120000, "☂ Showers", "blue"], [178000, "☇ Storm", "magenta"], [180000, "↯ Compact soon", "red"]]) {
       measure(used); await shows(text, "weather bin"); assert(tone() === color, `${text} uses ${color}`);
     }
+    assert(dock().nextElementSibling === form && !form.contains(dock()) && !document.querySelector('[data-testid="composer-editor"]').contains(dock()), "Band is above the composer and outside the editor");
     assert(bandText().includes("90%") && bandText().includes("180k / 200k"), "Percent and measured tokens shown"); results.push("measured weather bins and tones");
-    measure(36100, { complete: true }); await shows("Δ unknown (first turn)", "first completed turn");
+    measure(36100, { complete: true }); await shows("36.1k / 200k", "first completed turn");
+    assert(!/unknown|first turn|last turn|Δ/.test(bandText()), "First turn omits delta placeholders");
     measure(120000, { turnId: "turn-2" }); await shows("60%", "running turn");
-    assert(sparkline().length === 1 && bandText().includes("first turn"), "Running turns stay out of history");
+    assert(sparkline().length === 1 && !bandText().includes("last turn"), "Running turns stay out of history");
     measure(134400, { turnId: "turn-2", complete: true }); await shows("▲ +98.3k last turn", "completed delta");
     assert(bandText().includes("67%") && bandText().includes("134.4k / 200k") && sparkline().length === 2, "Completed turn recorded once");
     measure(140000, { turnId: "turn-2", complete: true }); await shows("▲ +103.9k last turn", "same-turn final measurement");
@@ -83,7 +84,7 @@
     telemetry.emit({ threadId: "thread-b", turnId: "other", usedTokens: 1000, maxTokens: 200000 });
     await new Promise((resolve) => setTimeout(resolve, 300));
     assert(bandText().includes("window size unavailable"), "Another thread's usage is ignored");
-    history.pushState({}, "", "/local/thread-c"); await shows("Context usage unavailable", "route without usage");
+    history.pushState({}, "", "/local/thread-c"); await wait(() => !band(), "route without usage hides weather");
     history.pushState({}, "", "/local/thread-b"); await shows("0%", "route to measured thread");
     history.pushState({}, "", "/local/thread-a"); await shows("window size unavailable", "route back");
     assert(sparkline().length === 3, "Per-thread history kept"); results.push("unknown window, thread filtering, and route refresh");

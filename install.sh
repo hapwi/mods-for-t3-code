@@ -1,5 +1,10 @@
 #!/bin/sh
 set -eu
+installer_action=install
+if [ "${1-}" = "--prepare-update" ]; then
+  installer_action=prepare-update
+  shift
+fi
 
 # Install only this tool into its own cache. Never replace node, npm, T3's
 # launcher, provider configs, or shell startup files.
@@ -49,10 +54,21 @@ curl -fsSL "https://codeload.github.com/${repository}/tar.gz/${revision}" -o "$d
 tar -xzf "$download/source.tar.gz" -C "$download"
 source="$download/mods-for-t3-code-$revision"
 tool="$tools_dir/package-$revision"
-if [ ! -d "$tool" ]; then mv "$source" "$tool"; fi
-"$node_bin" "$tool/dist/cli.mjs" install "$@"
+if [ ! -d "$tool" ]; then
+  runtime_package="$download/runtime-package"
+  mkdir "$runtime_package"
+  cp -R "$source/dist" "$runtime_package/dist"
+  cp "$source/package.json" "$source/LICENSE" "$runtime_package/"
+  mv "$runtime_package" "$tool"
+fi
+"$node_bin" "$tool/dist/cli.mjs" "$installer_action" "$@"
 launcher="$tools_dir/mods-for-t3-code"
 "$node_bin" -e 'const fs=require("fs");const q=s=>"\x27"+s.replaceAll("\x27","\x27\\\x27\x27")+"\x27";fs.writeFileSync(process.argv[1],"#!/bin/sh\nexport MODS_FOR_T3_DATA="+q(process.argv[4])+"\nexec "+q(process.argv[2])+" "+q(process.argv[3])+" \"$@\"\n",{mode:0o755})' "$launcher" "$node_bin" "$tool/dist/cli.mjs" "$data_dir"
+if [ "$installer_action" = prepare-update ]; then
+  printf '\nMaintenance command: %s\n' "$launcher"
+  printf '%s\n' 'Open T3 using its normal icon and update through T3. Private mod data is preserved.'
+  exit 0
+fi
 # Retire only the shortcut created by earlier versions of this installer.
 # The existing T3 icon continues to open the patched installed app.
 "$node_bin" --input-type=module - "$node_platform" "$launcher" <<'CLEANUP'

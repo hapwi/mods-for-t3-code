@@ -34,7 +34,8 @@ function turnKey(turnId: string): string {
 }
 
 export function line(snapshot: UsageSnapshot | null, turns: readonly number[]): BandPart[] {
-  if (!snapshot) return [{ text: "◌ Context usage unavailable for this view", tone: "muted" }];
+  // No measurement yet (e.g. a blank conversation): render nothing.
+  if (!snapshot) return [];
   const parts: BandPart[] = [];
   let tone: BandTone = "muted";
   if (snapshot.maxTokens) {
@@ -48,8 +49,8 @@ export function line(snapshot: UsageSnapshot | null, turns: readonly number[]): 
     const scale = snapshot.maxTokens ?? Math.max(...turns, 1);
     parts.push({ text: `  ${turns.map((used) => BARS[Math.min(7, Math.round(used / scale * 7))] ?? "").join("")}`, tone });
   }
-  if (turns.length === 1) parts.push({ text: "  Δ unknown (first turn)", tone: "muted" });
-  else if (turns.length > 1) {
+  // A delta needs two completed measurements; omit it until then.
+  if (turns.length > 1) {
     const latest = turns.at(-1);
     const prior = turns.at(-2);
     if (latest !== undefined && prior !== undefined) {
@@ -114,7 +115,9 @@ export async function activate(api: ModApi): Promise<void> {
     const parts = line(current, current ? (threads.get(current.threadId) ?? []).map((turn) => turn[1]) : []);
     const text = JSON.stringify(parts);
     if (text === shown) return;
-    shown = text; await api.band.set(parts);
+    shown = text;
+    if (parts.length) await api.band.set(parts);
+    else await api.band.clear();
   }
   async function update(snapshot: UsageSnapshot | null): Promise<void> { current = snapshot; record(snapshot); await draw(); }
 

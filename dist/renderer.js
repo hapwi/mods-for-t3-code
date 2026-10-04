@@ -472,7 +472,7 @@
       let reserve = 0;
       if (parts.some((rect) => rect.width > box.width / 2 || rect.left < box.left + box.width / 2)) lift = Math.max(0, box.top - Math.min(...parts.map((rect) => rect.top)));
       else if (parts.length) reserve = Math.max(0, box.right - Math.min(...parts.map((rect) => rect.left)) + 8);
-      Object.assign(element.style, FLOATING, { right: `${reserve}px`, bottom: `calc(100% + ${lift + 6}px)` });
+      Object.assign(element.style, FLOATING, { right: `${reserve}px`, bottom: `calc(100% + ${lift}px)` });
     }
     function place() {
       frame = void 0;
@@ -493,7 +493,6 @@
       }
       watch();
       element.style.cssText = inFlow;
-      element.style.marginBottom = "6px";
       const anchor = form ?? editor;
       if (!anchor.parentElement) {
         element.remove();
@@ -631,14 +630,45 @@
 
   // payload/web/author.ts
   function authorPrompt(description, inbox) {
-    const destination = inbox || "the current workspace";
     return `Create a mod for Mods for T3 Code (API version 1).
 
 What I want: ${description}
 
 Use my existing T3 provider session. Do not change T3 itself. Nothing runs until I review the mod in the Mods manager and choose Install.
 
-How to hand the mod back:
+${contract(inbox, "After the two blocks, tell me in plain words what the mod does and which permissions to review.")}`;
+  }
+  function quote(info, text) {
+    const fence = "`".repeat(Math.max(3, ...[...text.matchAll(/`+/g)].map(([run]) => run.length + 1)));
+    return `${fence}${info}
+${text}
+${fence}`;
+  }
+  function editPrompt(change, source, inbox) {
+    const { bundle: { manifest, code }, installed, builtIn } = source;
+    const [major = 0, minor = 0] = /^(\d+)\.(\d+)\.\d+/.exec(manifest.version)?.slice(1).map(Number) ?? [];
+    const origin = installed ? builtIn ? "This is my installed copy of a built-in mod, including any changes made to it since. Edit this code, not the original built-in sample." : "This is the version I have installed." : "This is a built-in mod included with Mods for T3 Code. It is not installed yet; send an edited variant I can install instead of the original.";
+    return `Edit a mod for Mods for T3 Code (API version 1).
+
+Mod: "${manifest.name}" (id ${manifest.id}, version ${manifest.version}, author ${manifest.author}). ${origin}
+
+What I want changed: ${change}
+
+Start from the complete current manifest and code below. Keep the id "${manifest.id}" and the author "${manifest.author}" exactly, and give it a higher SemVer version than ${manifest.version}, for example ${major}.${minor + 1}.0. Keep every existing feature and behavior I did not ask to change, and keep the name and description unless the change calls for new ones. Add a permission only when the change needs it. Send the complete updated mod, not a diff or only the changed parts.
+
+Current manifest:
+${quote("json", JSON.stringify(manifest, null, 2))}
+
+Current code:
+${quote("javascript", code)}
+
+Use my existing T3 provider session. Do not change T3 itself. Nothing changes until I review the edited mod in the Mods manager and choose ${installed ? "Update mod; until then the installed version keeps running" : "Install mod"}.
+
+${contract(inbox, "After the two blocks, tell me in plain words what you changed and any new permissions to review.")}`;
+  }
+  function contract(inbox, closing) {
+    const destination = inbox || "the current workspace";
+    return `How to hand the mod back:
 Your finished reply must contain exactly two fenced code blocks, in this order, with nothing else inside them:
 
 \`\`\`t3mod-manifest
@@ -664,7 +694,7 @@ T3 integration and design contract:
 This is a mod inside the existing T3 Code Electron app, written for the Mods for T3 Code API below. It is not a Claude Code plugin or Claude Code mod: T3 runs Claude through the Agent SDK, which does not render Claude Code mod UI inside T3. Do not use the plugin-authoring skill, plugin.json, hooks.json, register.js, register(), on(), ui.render, $.ui, tool.call or tool.check hooks, or any other Claude Code mods API, and do not write files under ~/.claude. T3 already owns the sidebar, Settings, thread list, conversation, composer, provider picker, and attachment drawer. Use the supported host surfaces below; do not rebuild T3, inject an overlay, invent DOM selectors, or assume a Claude Code terminal plugin API. Mods are workers, so document/window/React and T3's internal stores are unavailable. The host places and styles your output to match the current T3 theme.
 For a compact live indicator above the prompt use ui.band, with short plain text and semantic tones. Do not add a title panel or a second composer for a one-line indicator. For interactive actions use ui.panels or ui.commands. For themes use paired ui.theme tokens, including sidebar tokens when needed, instead of CSS or hardcoded layout. Keep labels concise, avoid decorative headings and redundant controls, and let the host choose fonts, spacing, borders, and light/dark colors.
 Install starts the mod immediately after permission review. It must work without restarting T3, update while the app stays open, and clean up its own timers when disabled. Treat navigation as a change of thread: do not display a previous thread's measurements on the next thread. Cache history by threadId, deduplicate completed turns by turnId, and preserve it with storage only if requested.
-Context measurements come from T3's actual provider-turn reports and cached thread projections. They are context-window usage, not subscription limits, cumulative billing totals, or a text-length estimate. A provider may return no measurement yet, and maxTokens may be unknown. Handle both states with a short muted message; never guess a 200k window, percentage, turn delta, or chart sample. Do not infer a token count from the model's name. Subscribe to both session.usage and turn.complete, and read api.session.usage() on activation. A completed turn may receive a corrected measurement later. Live indicators should render real data as soon as it arrives.
+Context measurements come from T3's actual provider-turn reports and cached thread projections. They are context-window usage, not subscription limits, cumulative billing totals, or a text-length estimate. A provider may return no measurement yet (for example in a blank conversation); prefer hiding a live context band with api.band.clear() until a measurement exists, rather than showing a placeholder. maxTokens may be unknown; show that with a short muted note. Omit a turn delta until two completed turns have been measured instead of showing an unknown placeholder; never guess a 200k window, percentage, turn delta, or chart sample. Do not infer a token count from the model's name. Subscribe to both session.usage and turn.complete, and read api.session.usage() on activation. A completed turn may receive a corrected measurement later. Live indicators should render real data as soon as it arrives.
 
 Mod code:
 The t3mod-code block is complete JavaScript, runs in an isolated browser worker, and must set globalThis.T3Mod.activate. No imports, DOM, Node, filesystem, network, credentials, tool approval, or model calls are available. A mod cannot intercept, block, rewrite, or approve tool calls, prompts, permission requests, or model requests, and it cannot replace T3's own interface; only the surfaces listed below exist. Declare only the permissions you need:
@@ -681,7 +711,7 @@ The t3mod-code block is complete JavaScript, runs in an isolated browser worker,
 - api.log("message") is always available.
 activate may return a cleanup function. All actions should finish within 5 seconds. Timers are fine. Long loops cause quarantine. Never request permissions outside this list.
 
-Before you answer, check the JavaScript syntax and that the manifest is valid JSON, without executing host API calls outside T3. Walk through activation, missing data, unknown window size, navigation, repeated completion events, disable, and re-enable. Do not claim a live T3 check you did not perform. After the two blocks, tell me in plain words what the mod does and which permissions to review.`;
+Before you answer, check the JavaScript syntax and that the manifest is valid JSON, without executing host API calls outside T3. Walk through activation, missing data, unknown window size, navigation, repeated completion events, disable, and re-enable. Do not claim a live T3 check you did not perform. ${closing}`;
   }
   function fixPrompt(name, id, version, problem) {
     const target = id ? `"${name}" (id ${id}${version ? `, version ${version}` : ""})` : `"${name}"`;
@@ -748,7 +778,7 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
 .panel{padding:10px;border-top:1px solid var(--mf-border)}.panel h2{font-size:13px;font-weight:600;margin:1px 0 4px}.panel p{font-size:12px;line-height:1.5;color:var(--mf-muted);white-space:pre-wrap}.panel .actions{justify-content:flex-start;flex-wrap:wrap;gap:4px;margin-top:8px}
 .panel-tray[data-docked]{position:relative;inset:auto;width:100%;max-height:30vh;box-shadow:none;z-index:auto;margin-bottom:8px;background:var(--mf-card)}
 @media(max-width:600px){header{padding:16px 16px 10px}.tabs{margin-inline:16px;max-width:calc(100% - 32px)}.content{padding:12px 16px 16px}.row{flex-direction:column;align-items:stretch;gap:8px}.row-actions{justify-content:flex-start;flex-wrap:wrap}.panel-tray{width:280px}}
-.band-stack{padding:0 16px;font-size:12px;line-height:16px;color:var(--mf-muted)}.band{white-space:pre;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}.band [data-tone=muted]{color:var(--mf-muted)}.band [data-tone=yellow]{color:var(--color-yellow-500,#d4a72c)}.band [data-tone=cyan]{color:var(--color-cyan-500,#22a8bd)}.band [data-tone=blue]{color:var(--info,var(--color-blue-500,#3b82f6))}.band [data-tone=magenta]{color:var(--color-fuchsia-500,#c85bd8)}.band [data-tone=red]{color:var(--destructive,#e5534b)}
+.band-stack{width:fit-content;max-width:100%;padding:2px 16px 6px;border-top-right-radius:var(--mf-control-radius);background:var(--mf-bg);font-size:12px;line-height:16px;color:var(--mf-muted)}.band{white-space:pre;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}.band [data-tone=muted]{color:var(--mf-muted)}.band [data-tone=yellow]{color:var(--color-yellow-500,#d4a72c)}.band [data-tone=cyan]{color:var(--color-cyan-500,#22a8bd)}.band [data-tone=blue]{color:var(--info,var(--color-blue-500,#3b82f6))}.band [data-tone=magenta]{color:var(--color-fuchsia-500,#c85bd8)}.band [data-tone=red]{color:var(--destructive,#e5534b)}
 `;
 
   // payload/web/themes.ts
@@ -1104,6 +1134,8 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
     const problems = [];
     let tab = "installed";
     let review;
+    let editing;
+    const editTexts = /* @__PURE__ */ new Map();
     let flash;
     let createText = "";
     let importText = "";
@@ -1248,11 +1280,13 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
     function go(key) {
       tab = key;
       review = void 0;
+      editing = void 0;
       flash = void 0;
       render();
     }
     function showReview(next) {
       review = next;
+      editing = void 0;
       flash = void 0;
       render();
       if (!dialog.open) dialog.showModal();
@@ -1357,7 +1391,7 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
     }
     const recordFor = (id) => records.find((record) => record.manifest.id === id);
     function refresh() {
-      if (dialog.open && !review && !busy && (tab === "installed" || tab === "examples")) render();
+      if (dialog.open && !review && !editing && !busy && (tab === "installed" || tab === "examples")) render();
       renderTray();
     }
     function start(record) {
@@ -1442,6 +1476,7 @@ ${text}`, "Add to draft") || current.stopped) return false;
     }
     function open2(nextTab) {
       leaveInline();
+      if (nextTab) editing = void 0;
       if (nextTab || !review?.entry) {
         tab = nextTab ?? "installed";
         review = void 0;
@@ -1691,12 +1726,27 @@ ${text}`;
       anchor.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1e3);
     }
-    function draftInChat(text) {
+    function draftInChat(text, done) {
       void run(async () => {
+        const request = typeof text === "string" ? text : text();
         if (!composer()) throw new Error("Open a chat thread first, then try again. The request goes into that thread\u2019s composer.");
         closeManager();
-        insertDraft((readDraft() ? "\n\n" : "") + text);
+        insertDraft((readDraft() ? "\n\n" : "") + request);
+        done?.();
       });
+    }
+    function editSource(id) {
+      const installed = recordFor(id);
+      const example = (options.examples ?? []).find((item) => item.manifest.id === id);
+      if (installed) return { bundle: validateBundle(installed), installed: true, builtIn: Boolean(example) };
+      return example ? { bundle: validateBundle(example), installed: false, builtIn: true } : void 0;
+    }
+    function showEdit(id, back) {
+      editing = { id, ...back ? { back } : {} };
+      review = void 0;
+      flash = void 0;
+      render();
+      if (!dialog.open) dialog.showModal();
     }
     async function install(current) {
       const { bundle, entry } = current;
@@ -1759,7 +1809,7 @@ ${text}`;
       const { manifest } = record;
       const count = manifest.permissions.length;
       const reason = record.quarantined;
-      const items = [["Details", () => showReview({ bundle: validateBundle(record), detailsOnly: true })]];
+      const items = [["Details", () => showReview({ bundle: validateBundle(record), detailsOnly: true })], ["Edit", () => showEdit(manifest.id)]];
       if (reason) items.push(["Ask AI to fix", () => draftInChat(fixPrompt(manifest.name, manifest.id, manifest.version, reason))]);
       items.push(["Export", () => download(record)], ["Remove", () => void run(async () => {
         if (!await ask(`Remove ${manifest.name}?`, "The mod and its private data will be removed. Export it first if you want a copy.", "Remove mod", true)) return;
@@ -1797,6 +1847,10 @@ ${text}`;
       const actions = [button("Import", () => go("import"), "xs")];
       if (!inlineContent) actions.push(closeButton(closeManager));
       dialog.replaceChildren(node("header", {}, [node("div", {}, [node("h1", { text: "Mods" }), node("p", { text: "Local add-ons for T3 Code. Each mod runs isolated and can be switched off at any time." })]), node("div", { class: "header-actions" }, actions)]));
+      if (editing) {
+        renderEdit(editing);
+        return;
+      }
       if (review) {
         renderReview(review);
         return;
@@ -1839,14 +1893,21 @@ ${text}`;
           const bundle = validateBundle(example);
           const { manifest } = bundle;
           const installed = recordFor(manifest.id);
-          if (!installed) return row(manifest.name, manifest.description, [button("Review", () => showReview({ bundle }), "xs")], [meta(`${manifest.version} \xB7 not installed`)]);
+          const more = moreButton(`More actions for ${manifest.name}`, [["Edit", () => showEdit(manifest.id)]]);
+          if (!installed) {
+            const element2 = row(manifest.name, manifest.description, [more, button("Review", () => showReview({ bundle }), "xs")], [meta(`${manifest.version} \xB7 not installed`)]);
+            element2.dataset.example = manifest.id;
+            return element2;
+          }
           const current = sameBundle(installed, bundle);
           const element = row([document.createTextNode(manifest.name), stateBadge(installed)], manifest.description, [
+            more,
             ...current ? [] : [button("Review update", () => showReview({ bundle }), "xs")],
             ...installed.quarantined && !options.safeMode ? [button("Retry", () => retry(installed), "xs")] : [],
             enableToggle(installed)
           ], [meta(current ? `${manifest.version} \xB7 installed` : `${installed.manifest.version} installed \xB7 ${manifest.version} included`)]);
           element.dataset.mod = manifest.id;
+          element.dataset.example = manifest.id;
           return element;
         });
         content.append(section("Built-in", list.length ? list : [note("No built-in mods in this build.")]), node("p", { class: "explain", text: "Included with Mods for T3 Code. Review one to install it; it starts right away and you can switch it off here or under Installed. Themes use T3\u2019s own color tokens and restore your appearance when turned off." }));
@@ -1937,7 +1998,7 @@ ${text}`;
       const footer = node("div", { class: "footer actions" });
       if (detailsOnly) {
         content.append(node("details", {}, [node("summary", { text: "JavaScript source" }), node("pre", { class: "review-code", text: bundle.code })]));
-        footer.append(button("Done", () => {
+        footer.append(button("Edit", () => showEdit(manifest.id, current), "xs"), button("Done", () => {
           review = void 0;
           render();
         }, "xs"));
@@ -1951,10 +2012,64 @@ ${text}`;
         tab = "installed";
         render();
       }, "xs"), confirm);
-      else footer.append(button("Cancel", () => {
+      else footer.append(...previous ? [] : [button("Edit", () => showEdit(manifest.id, current), "ghost xs start")], button("Cancel", () => {
         review = void 0;
         render();
       }, "xs"), confirm);
+      dialog.append(content, footer);
+    }
+    function renderEdit(current) {
+      const { id } = current;
+      const source = editSource(id);
+      const back = () => {
+        editing = void 0;
+        review = current.back;
+        flash = void 0;
+        render();
+      };
+      const content = node("div", { class: "content" });
+      const footer = node("div", { class: "footer actions" });
+      if (flash) content.append(node("p", { class: "flash", "data-tone": flash.tone, role: flash.tone === "error" ? "alert" : "status", text: flash.text }));
+      if (!source) {
+        content.append(node("p", { class: "explain", text: "This mod is no longer installed." }));
+        footer.append(button("Back", back, "xs"));
+        dialog.append(content, footer);
+        return;
+      }
+      const { manifest } = source.bundle;
+      const waiting = pending.some((entry) => entry.bundle.manifest.id === id);
+      content.append(node("div", { class: "review-title" }, [
+        node("h2", { text: `Edit ${manifest.name}` }),
+        node("p", { class: "explain", text: manifest.description }),
+        meta([manifest.version, manifest.author, source.installed ? "Installed" : "Built-in \xB7 not installed"].join(" \xB7 "))
+      ]));
+      const text = node("textarea", { placeholder: "Also show the context window size, use shorter labels\u2026", "aria-label": `Changes for ${manifest.name}`, maxLength: 5e3, value: editTexts.get(id) ?? "" });
+      text.oninput = () => {
+        editTexts.set(id, text.value);
+      };
+      const request = () => {
+        const change = (editTexts.get(id) ?? "").trim();
+        if (!change) throw new Error("Describe what should change first.");
+        const latest = editSource(id);
+        if (!latest) throw new Error(`${manifest.name} is no longer installed.`);
+        return editPrompt(change, latest, options.inbox);
+      };
+      content.append(section("Changes", [node("div", { class: "body" }, [
+        node("label", { text: "What should change?" }),
+        text,
+        node("p", { class: "explain", text: `Draft in T3 adds a request with ${source.installed ? "your installed copy\u2019s" : "this mod\u2019s"} complete code to the open chat\u2019s composer. Send it with the model and account you already use. The edited mod keeps its id and appears under Waiting for review; ${source.installed ? "the installed version keeps running until you review the update." : "nothing is installed until you review it."}${waiting ? " It replaces the update already waiting for review." : ""}` })
+      ])]));
+      footer.append(
+        button("Cancel", back, "xs"),
+        button("Copy request", () => void run(async () => {
+          await navigator.clipboard.writeText(request());
+          flash = { tone: "info", text: "Request copied. Paste it into a T3 chat and send it." };
+        }), "xs"),
+        button("Draft in T3", () => draftInChat(request, () => {
+          editTexts.delete(id);
+          editing = void 0;
+        }), "primary xs")
+      );
       dialog.append(content, footer);
     }
     function onInput(event) {
@@ -2138,7 +2253,7 @@ ${text}`;
   // renderer-entry.js
   if (!window.__modsForT3Installing && !window.__modsForT3Code) {
     window.__modsForT3Installing = true;
-    mount({ examples: [{ "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "focus-timer", "version": "1.0.0", "name": "Focus timer", "description": "A small timer in the Mods tray. Start a 25 minute session and get a reminder when it ends.", "author": "Mods for T3 Code", "permissions": ["ui.panels", "ui.commands", "ui.notify"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/focus-timer/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    let remaining = 25 * 60;\n    let running = false;\n    async function draw() {\n      const minutes = Math.floor(remaining / 60);\n      const seconds = String(remaining % 60).padStart(2, "0");\n      await api.panels.set({ title: `${minutes}:${seconds}`, body: running ? "One task at a time. Your focus session is running." : "Ready for a little focused work?", actions: [{ id: "toggle", label: running ? "Pause" : "Start" }, { id: "reset", label: "Reset" }] });\n    }\n    api.panels.action("toggle", async () => {\n      running = !running;\n      await draw();\n    });\n    api.panels.action("reset", async () => {\n      remaining = 25 * 60;\n      running = false;\n      await draw();\n    });\n    await api.commands.register({ id: "start", title: "Start a 25 minute focus session" }, async () => {\n      remaining = 25 * 60;\n      running = true;\n      await draw();\n    });\n    const interval = setInterval(() => {\n      void (async () => {\n        if (!running) return;\n        remaining--;\n        if (remaining <= 0) {\n          running = false;\n          await api.notify("Focus session finished. Take a short break.");\n        }\n        await draw();\n      })();\n    }, 1e3);\n    await draw();\n    return () => clearInterval(interval);\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "prompt-kit", "version": "1.0.0", "name": "Prompt kit", "description": "Local commands that offer useful review and debugging prompts for your current T3 draft. Every insertion asks first.", "author": "Mods for T3 Code", "permissions": ["ui.commands", "draft.insert"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/prompt-kit/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    await api.commands.register({ id: "review", title: "Draft a focused code review" }, () => api.draft.insert("Review the changes in this thread. Focus on correctness and the behavior requested. Explain any concrete issues and the smallest fix."));\n    await api.commands.register({ id: "debug", title: "Draft a debugging request" }, () => api.draft.insert("Investigate this failure. Find the smallest reproducible cause, explain it, and make a focused fix. Run only the checks needed to confirm the fix."));\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "token-weather", "version": "1.0.0", "name": "Token weather", "description": "A one-line forecast above the composer: measured context use for the open thread, a sparkline of recent completed turns, and the last turn\u2019s change.", "author": "Mods for T3 Code", "permissions": ["ui.band", "session.usage", "storage"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/token-weather/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate,\n    formatTokens: () => formatTokens,\n    line: () => line,\n    weather: () => weather\n  });\n  var WEATHER = [\n    { below: 25, icon: "\\u2600", label: "Clear", tone: "yellow" },\n    { below: 50, icon: "\\u2601", label: "Cloudy", tone: "cyan" },\n    { below: 75, icon: "\\u2602", label: "Showers", tone: "blue" },\n    { below: 90, icon: "\\u2607", label: "Storm", tone: "magenta" },\n    { below: Infinity, icon: "\\u21AF", label: "Compact soon", tone: "red" }\n  ];\n  var BARS = "\\u2581\\u2582\\u2583\\u2584\\u2585\\u2586\\u2587\\u2588";\n  var MAX_TURNS = 12;\n  var MAX_THREADS = 40;\n  function formatTokens(value) {\n    if (value < 1e3) return String(value);\n    if (value < 999950) return `${(value / 1e3).toFixed(1).replace(/\\.0$/, "")}k`;\n    return `${(value / 1e6).toFixed(2).replace(/\\.?0+$/, "")}M`;\n  }\n  function weather(percent) {\n    const forecast = WEATHER.find((item) => percent < item.below);\n    if (forecast) return forecast;\n    const fallback = WEATHER[WEATHER.length - 1];\n    if (!fallback) throw new Error("Weather scale is empty.");\n    return fallback;\n  }\n  function turnKey(turnId) {\n    let hash = 2166136261;\n    for (let index = 0; index < turnId.length; index++) hash = Math.imul(hash ^ turnId.charCodeAt(index), 16777619);\n    return (hash >>> 0).toString(36);\n  }\n  function line(snapshot, turns) {\n    if (!snapshot) return [{ text: "\\u25CC Context usage unavailable for this view", tone: "muted" }];\n    const parts = [];\n    let tone = "muted";\n    if (snapshot.maxTokens) {\n      const percent = Math.floor(snapshot.usedTokens / snapshot.maxTokens * 100);\n      const forecast = weather(percent);\n      tone = forecast.tone;\n      parts.push({ text: `${forecast.icon} ${forecast.label}`, tone }, { text: `  ${percent}%` }, { text: `  ${formatTokens(snapshot.usedTokens)} / ${formatTokens(snapshot.maxTokens)}`, tone: "muted" });\n    } else {\n      parts.push({ text: "\\u25CC Window unknown", tone: "muted" }, { text: `  ${formatTokens(snapshot.usedTokens)} used \\xB7 window size unavailable`, tone: "muted" });\n    }\n    if (turns.length) {\n      const scale = snapshot.maxTokens ?? Math.max(...turns, 1);\n      parts.push({ text: `  ${turns.map((used) => BARS[Math.min(7, Math.round(used / scale * 7))] ?? "").join("")}`, tone });\n    }\n    if (turns.length === 1) parts.push({ text: "  \\u0394 unknown (first turn)", tone: "muted" });\n    else if (turns.length > 1) {\n      const latest = turns.at(-1);\n      const prior = turns.at(-2);\n      if (latest !== void 0 && prior !== void 0) {\n        const delta = latest - prior;\n        parts.push(delta >= 0 ? { text: `  \\u25B2 +${formatTokens(delta)} last turn` } : { text: `  \\u25BC \\u2212${formatTokens(-delta)} last turn`, tone: "cyan" });\n      }\n    }\n    return parts;\n  }\n  function isRecord(value) {\n    return typeof value === "object" && value !== null && !Array.isArray(value);\n  }\n  function readTurn(value) {\n    if (!Array.isArray(value) || typeof value[0] !== "string" || typeof value[1] !== "number") return null;\n    if (!Number.isSafeInteger(value[1]) || value[1] < 0) return null;\n    return [value[0], value[1]];\n  }\n  function historyPayload(threads) {\n    const encoded = [];\n    for (const [threadId, turns] of threads) encoded.push([threadId, turns.map((turn) => [turn[0], turn[1]])]);\n    return { version: 1, threads: encoded };\n  }\n  async function activate(api) {\n    const threads = /* @__PURE__ */ new Map();\n    const saved = await api.storage.get("history");\n    if (isRecord(saved) && saved.version === 1 && Array.isArray(saved.threads)) {\n      for (const item of saved.threads.slice(-MAX_THREADS)) {\n        if (!Array.isArray(item) || typeof item[0] !== "string" || !Array.isArray(item[1])) continue;\n        const turns = [];\n        for (const turn of item[1]) {\n          const stored = readTurn(turn);\n          if (stored) turns.push(stored);\n        }\n        threads.set(item[0], turns.slice(-MAX_TURNS));\n      }\n    }\n    let current = await api.session.usage();\n    let shown = "";\n    function record(snapshot) {\n      if (!snapshot?.complete || !snapshot.turnId) return;\n      const turns = threads.get(snapshot.threadId) ?? [];\n      const key = turnKey(snapshot.turnId);\n      const existing = turns.find((turn) => turn[0] === key);\n      if (existing) {\n        if (existing[1] === snapshot.usedTokens) return;\n        existing[1] = snapshot.usedTokens;\n      } else turns.push([key, snapshot.usedTokens]);\n      threads.delete(snapshot.threadId);\n      threads.set(snapshot.threadId, turns.slice(-MAX_TURNS));\n      while (threads.size > MAX_THREADS) {\n        const oldest = threads.keys().next().value;\n        if (oldest === void 0) break;\n        threads.delete(oldest);\n      }\n      void api.storage.set("history", historyPayload(threads));\n    }\n    async function draw() {\n      const parts = line(current, current ? (threads.get(current.threadId) ?? []).map((turn) => turn[1]) : []);\n      const text = JSON.stringify(parts);\n      if (text === shown) return;\n      shown = text;\n      await api.band.set(parts);\n    }\n    async function update(snapshot) {\n      current = snapshot;\n      record(snapshot);\n      await draw();\n    }\n    api.on("session.usage", update);\n    api.on("turn.complete", (snapshot) => update(snapshot));\n    record(current);\n    await draw();\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "midnight-theme", "version": "1.0.0", "name": "Midnight blue", "description": "A calm dark palette using T3\u2019s native theme tokens. Turning it off restores your normal appearance.", "author": "Mods for T3 Code", "permissions": ["ui.theme"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/midnight-theme/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    await api.theme.set({\n      background: "#17212f",\n      foreground: "#edf2f8",\n      card: "#1d2939",\n      "card-foreground": "#edf2f8",\n      popover: "#253348",\n      "popover-foreground": "#edf2f8",\n      primary: "#8db9ef",\n      "primary-foreground": "#152033",\n      secondary: "#263750",\n      "secondary-foreground": "#edf2f8",\n      muted: "#243247",\n      "muted-foreground": "#b8c5d8",\n      accent: "#304562",\n      "accent-foreground": "#edf2f8",\n      border: "#3e526d",\n      input: "#435872",\n      ring: "#8db9ef",\n      sidebar: "#131d2b",\n      "sidebar-foreground": "#edf2f8",\n      "sidebar-accent": "#304562",\n      "sidebar-accent-foreground": "#edf2f8",\n      "sidebar-border": "#3e526d",\n      "sidebar-ring": "#8db9ef"\n    });\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "paper-theme", "version": "1.0.0", "name": "Quiet paper", "description": "A soft light palette with blue controls. Uses T3\u2019s own tokens and restores the original theme when disabled.", "author": "Mods for T3 Code", "permissions": ["ui.theme"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/paper-theme/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    await api.theme.set({\n      background: "#f5f6f8",\n      foreground: "#253044",\n      card: "#ffffff",\n      "card-foreground": "#253044",\n      popover: "#ffffff",\n      "popover-foreground": "#253044",\n      primary: "#284f88",\n      "primary-foreground": "#ffffff",\n      secondary: "#e7ecf3",\n      "secondary-foreground": "#253044",\n      muted: "#edf0f4",\n      "muted-foreground": "#536176",\n      accent: "#dce5f2",\n      "accent-foreground": "#253044",\n      border: "#c8d2df",\n      input: "#becbdb",\n      ring: "#284f88",\n      sidebar: "#e7ecf3",\n      "sidebar-foreground": "#253044",\n      "sidebar-accent": "#dce5f2",\n      "sidebar-accent-foreground": "#253044",\n      "sidebar-border": "#c8d2df",\n      "sidebar-ring": "#284f88"\n    });\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }], ...window.__MODS_FOR_T3_OPTIONS__, sandboxDocument: `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; connect-src 'none'; img-src 'none'; style-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'"><title>Isolated mod runtime</title></head><body><script>"use strict";
+    mount({ examples: [{ "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "focus-timer", "version": "1.0.0", "name": "Focus timer", "description": "A small timer in the Mods tray. Start a 25 minute session and get a reminder when it ends.", "author": "Mods for T3 Code", "permissions": ["ui.panels", "ui.commands", "ui.notify"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/focus-timer/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    let remaining = 25 * 60;\n    let running = false;\n    async function draw() {\n      const minutes = Math.floor(remaining / 60);\n      const seconds = String(remaining % 60).padStart(2, "0");\n      await api.panels.set({ title: `${minutes}:${seconds}`, body: running ? "One task at a time. Your focus session is running." : "Ready for a little focused work?", actions: [{ id: "toggle", label: running ? "Pause" : "Start" }, { id: "reset", label: "Reset" }] });\n    }\n    api.panels.action("toggle", async () => {\n      running = !running;\n      await draw();\n    });\n    api.panels.action("reset", async () => {\n      remaining = 25 * 60;\n      running = false;\n      await draw();\n    });\n    await api.commands.register({ id: "start", title: "Start a 25 minute focus session" }, async () => {\n      remaining = 25 * 60;\n      running = true;\n      await draw();\n    });\n    const interval = setInterval(() => {\n      void (async () => {\n        if (!running) return;\n        remaining--;\n        if (remaining <= 0) {\n          running = false;\n          await api.notify("Focus session finished. Take a short break.");\n        }\n        await draw();\n      })();\n    }, 1e3);\n    await draw();\n    return () => clearInterval(interval);\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "prompt-kit", "version": "1.0.0", "name": "Prompt kit", "description": "Local commands that offer useful review and debugging prompts for your current T3 draft. Every insertion asks first.", "author": "Mods for T3 Code", "permissions": ["ui.commands", "draft.insert"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/prompt-kit/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    await api.commands.register({ id: "review", title: "Draft a focused code review" }, () => api.draft.insert("Review the changes in this thread. Focus on correctness and the behavior requested. Explain any concrete issues and the smallest fix."));\n    await api.commands.register({ id: "debug", title: "Draft a debugging request" }, () => api.draft.insert("Investigate this failure. Find the smallest reproducible cause, explain it, and make a focused fix. Run only the checks needed to confirm the fix."));\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "token-weather", "version": "1.0.0", "name": "Token weather", "description": "A one-line forecast above the composer: measured context use for the open thread, a sparkline of recent completed turns, and the last turn\u2019s change.", "author": "Mods for T3 Code", "permissions": ["ui.band", "session.usage", "storage"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/token-weather/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate,\n    formatTokens: () => formatTokens,\n    line: () => line,\n    weather: () => weather\n  });\n  var WEATHER = [\n    { below: 25, icon: "\\u2600", label: "Clear", tone: "yellow" },\n    { below: 50, icon: "\\u2601", label: "Cloudy", tone: "cyan" },\n    { below: 75, icon: "\\u2602", label: "Showers", tone: "blue" },\n    { below: 90, icon: "\\u2607", label: "Storm", tone: "magenta" },\n    { below: Infinity, icon: "\\u21AF", label: "Compact soon", tone: "red" }\n  ];\n  var BARS = "\\u2581\\u2582\\u2583\\u2584\\u2585\\u2586\\u2587\\u2588";\n  var MAX_TURNS = 12;\n  var MAX_THREADS = 40;\n  function formatTokens(value) {\n    if (value < 1e3) return String(value);\n    if (value < 999950) return `${(value / 1e3).toFixed(1).replace(/\\.0$/, "")}k`;\n    return `${(value / 1e6).toFixed(2).replace(/\\.?0+$/, "")}M`;\n  }\n  function weather(percent) {\n    const forecast = WEATHER.find((item) => percent < item.below);\n    if (forecast) return forecast;\n    const fallback = WEATHER[WEATHER.length - 1];\n    if (!fallback) throw new Error("Weather scale is empty.");\n    return fallback;\n  }\n  function turnKey(turnId) {\n    let hash = 2166136261;\n    for (let index = 0; index < turnId.length; index++) hash = Math.imul(hash ^ turnId.charCodeAt(index), 16777619);\n    return (hash >>> 0).toString(36);\n  }\n  function line(snapshot, turns) {\n    if (!snapshot) return [];\n    const parts = [];\n    let tone = "muted";\n    if (snapshot.maxTokens) {\n      const percent = Math.floor(snapshot.usedTokens / snapshot.maxTokens * 100);\n      const forecast = weather(percent);\n      tone = forecast.tone;\n      parts.push({ text: `${forecast.icon} ${forecast.label}`, tone }, { text: `  ${percent}%` }, { text: `  ${formatTokens(snapshot.usedTokens)} / ${formatTokens(snapshot.maxTokens)}`, tone: "muted" });\n    } else {\n      parts.push({ text: "\\u25CC Window unknown", tone: "muted" }, { text: `  ${formatTokens(snapshot.usedTokens)} used \\xB7 window size unavailable`, tone: "muted" });\n    }\n    if (turns.length) {\n      const scale = snapshot.maxTokens ?? Math.max(...turns, 1);\n      parts.push({ text: `  ${turns.map((used) => BARS[Math.min(7, Math.round(used / scale * 7))] ?? "").join("")}`, tone });\n    }\n    if (turns.length > 1) {\n      const latest = turns.at(-1);\n      const prior = turns.at(-2);\n      if (latest !== void 0 && prior !== void 0) {\n        const delta = latest - prior;\n        parts.push(delta >= 0 ? { text: `  \\u25B2 +${formatTokens(delta)} last turn` } : { text: `  \\u25BC \\u2212${formatTokens(-delta)} last turn`, tone: "cyan" });\n      }\n    }\n    return parts;\n  }\n  function isRecord(value) {\n    return typeof value === "object" && value !== null && !Array.isArray(value);\n  }\n  function readTurn(value) {\n    if (!Array.isArray(value) || typeof value[0] !== "string" || typeof value[1] !== "number") return null;\n    if (!Number.isSafeInteger(value[1]) || value[1] < 0) return null;\n    return [value[0], value[1]];\n  }\n  function historyPayload(threads) {\n    const encoded = [];\n    for (const [threadId, turns] of threads) encoded.push([threadId, turns.map((turn) => [turn[0], turn[1]])]);\n    return { version: 1, threads: encoded };\n  }\n  async function activate(api) {\n    const threads = /* @__PURE__ */ new Map();\n    const saved = await api.storage.get("history");\n    if (isRecord(saved) && saved.version === 1 && Array.isArray(saved.threads)) {\n      for (const item of saved.threads.slice(-MAX_THREADS)) {\n        if (!Array.isArray(item) || typeof item[0] !== "string" || !Array.isArray(item[1])) continue;\n        const turns = [];\n        for (const turn of item[1]) {\n          const stored = readTurn(turn);\n          if (stored) turns.push(stored);\n        }\n        threads.set(item[0], turns.slice(-MAX_TURNS));\n      }\n    }\n    let current = await api.session.usage();\n    let shown = "";\n    function record(snapshot) {\n      if (!snapshot?.complete || !snapshot.turnId) return;\n      const turns = threads.get(snapshot.threadId) ?? [];\n      const key = turnKey(snapshot.turnId);\n      const existing = turns.find((turn) => turn[0] === key);\n      if (existing) {\n        if (existing[1] === snapshot.usedTokens) return;\n        existing[1] = snapshot.usedTokens;\n      } else turns.push([key, snapshot.usedTokens]);\n      threads.delete(snapshot.threadId);\n      threads.set(snapshot.threadId, turns.slice(-MAX_TURNS));\n      while (threads.size > MAX_THREADS) {\n        const oldest = threads.keys().next().value;\n        if (oldest === void 0) break;\n        threads.delete(oldest);\n      }\n      void api.storage.set("history", historyPayload(threads));\n    }\n    async function draw() {\n      const parts = line(current, current ? (threads.get(current.threadId) ?? []).map((turn) => turn[1]) : []);\n      const text = JSON.stringify(parts);\n      if (text === shown) return;\n      shown = text;\n      if (parts.length) await api.band.set(parts);\n      else await api.band.clear();\n    }\n    async function update(snapshot) {\n      current = snapshot;\n      record(snapshot);\n      await draw();\n    }\n    api.on("session.usage", update);\n    api.on("turn.complete", (snapshot) => update(snapshot));\n    record(current);\n    await draw();\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "midnight-theme", "version": "1.0.0", "name": "Midnight blue", "description": "A calm dark palette using T3\u2019s native theme tokens. Turning it off restores your normal appearance.", "author": "Mods for T3 Code", "permissions": ["ui.theme"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/midnight-theme/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    await api.theme.set({\n      background: "#17212f",\n      foreground: "#edf2f8",\n      card: "#1d2939",\n      "card-foreground": "#edf2f8",\n      popover: "#253348",\n      "popover-foreground": "#edf2f8",\n      primary: "#8db9ef",\n      "primary-foreground": "#152033",\n      secondary: "#263750",\n      "secondary-foreground": "#edf2f8",\n      muted: "#243247",\n      "muted-foreground": "#b8c5d8",\n      accent: "#304562",\n      "accent-foreground": "#edf2f8",\n      border: "#3e526d",\n      input: "#435872",\n      ring: "#8db9ef",\n      sidebar: "#131d2b",\n      "sidebar-foreground": "#edf2f8",\n      "sidebar-accent": "#304562",\n      "sidebar-accent-foreground": "#edf2f8",\n      "sidebar-border": "#3e526d",\n      "sidebar-ring": "#8db9ef"\n    });\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }, { "format": "t3mod/1", "manifest": { "apiVersion": 1, "id": "paper-theme", "version": "1.0.0", "name": "Quiet paper", "description": "A soft light palette with blue controls. Uses T3\u2019s own tokens and restores the original theme when disabled.", "author": "Mods for T3 Code", "permissions": ["ui.theme"] }, "code": '"use strict";\nvar T3Mod = (() => {\n  var __defProp = Object.defineProperty;\n  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;\n  var __getOwnPropNames = Object.getOwnPropertyNames;\n  var __hasOwnProp = Object.prototype.hasOwnProperty;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __copyProps = (to, from, except, desc) => {\n    if (from && typeof from === "object" || typeof from === "function") {\n      for (let key of __getOwnPropNames(from))\n        if (!__hasOwnProp.call(to, key) && key !== except)\n          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });\n    }\n    return to;\n  };\n  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);\n\n  // examples/paper-theme/mod.ts\n  var mod_exports = {};\n  __export(mod_exports, {\n    activate: () => activate\n  });\n  async function activate(api) {\n    await api.theme.set({\n      background: "#f5f6f8",\n      foreground: "#253044",\n      card: "#ffffff",\n      "card-foreground": "#253044",\n      popover: "#ffffff",\n      "popover-foreground": "#253044",\n      primary: "#284f88",\n      "primary-foreground": "#ffffff",\n      secondary: "#e7ecf3",\n      "secondary-foreground": "#253044",\n      muted: "#edf0f4",\n      "muted-foreground": "#536176",\n      accent: "#dce5f2",\n      "accent-foreground": "#253044",\n      border: "#c8d2df",\n      input: "#becbdb",\n      ring: "#284f88",\n      sidebar: "#e7ecf3",\n      "sidebar-foreground": "#253044",\n      "sidebar-accent": "#dce5f2",\n      "sidebar-accent-foreground": "#253044",\n      "sidebar-border": "#c8d2df",\n      "sidebar-ring": "#284f88"\n    });\n  }\n  return __toCommonJS(mod_exports);\n})();\n\nglobalThis.T3Mod = T3Mod;\n' }], ...window.__MODS_FOR_T3_OPTIONS__, sandboxDocument: `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; connect-src 'none'; img-src 'none'; style-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'"><title>Isolated mod runtime</title></head><body><script>"use strict";
 (() => {
   // payload/public/sandbox.ts
   (() => {

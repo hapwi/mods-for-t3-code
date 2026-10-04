@@ -7,12 +7,14 @@ import path from "node:path";
 import { archiveHeader, readEntry, sha256 } from "./archive.ts";
 import { failureText } from "./failure.ts";
 import { command, dataRoot, exists, patchArchive, installRuntime, removeStaleOwnedCopy } from "./install.ts";
+import { appPids } from "./mac-session.ts";
 
 export interface MacInstallOptions {
   hostPlatform?: NodeJS.Platform;
   onProgress?: (message: string) => void;
   runner?: (binary: string, args: readonly string[]) => Promise<{ stdout?: string; stderr?: string }>;
   spawn?: (binary: string, args: readonly string[], spawnOptions?: SpawnOptions) => Promise<void>;
+  assertClosed?: (installedApp: string) => Promise<void>;
 }
 
 export interface SignatureDetails {
@@ -106,6 +108,10 @@ interface RunnerFailure extends Error {
 // Ad-hoc signing can stop Squirrel from applying updates. Squirrel.framework
 // and the app's updater settings are left in place; that updater path is not
 // verified here. Uninstall restores the vendor-signed backup.
+// prepareMacNativeUpdate uses that same closed-app restore only when the live
+// archive is still the recorded patch and the backup still matches the saved
+// vendor signature. A clean upstream app is left in place. The update feed and
+// signature checks are not changed, and nativeUpdaterVerified stays false.
 // Gatekeeper, the sandbox, the ASAR integrity fuse, and quarantine are not disabled.
 const marker = "/* mods-for-t3-code:v1 */";
 const execute = promisify(execFile);
@@ -250,6 +256,38 @@ export function macRestorePlan({ liveHash, recordedPatchedHash, backupHash, reco
   if (liveHash === recordedPatchedHash && backupHash === recordedOriginalHash) return "restore";
   if (liveHash !== recordedPatchedHash && recognized && markerFree) return "keep-update";
   return "refuse";
+}
+
+export interface NativeUpdatePreparationInput extends RestorePlanInput {
+  backupAdhoc: boolean;
+  backupCdHash: string | null;
+  vendorCdHash?: string | null;
+}
+
+export interface MacNativeUpdatePreparation {
+  action: "restored-vendor" | "kept-update";
+  prepared: true;
+  restored: boolean;
+  keptUpdate: boolean;
+  installedApp: string;
+  original: string;
+  archive: string;
+  executable: string;
+  appVersion?: string;
+  patchedInPlace: true;
+  signature: string;
+  updaterEnabled: true;
+  nativeUpdaterVerified: false;
+}
+
+// Restoring is allowed only for the recorded patch whose backup is still the
+// saved vendor signature. Any other plan, including a clean upstream app, is
+// unchanged by this check.
+export function macNativeUpdatePreparationPlan(input: NativeUpdatePreparationInput): NativeRestoreAction {
+  const plan = macRestorePlan(input);
+  if (plan !== "restore") return plan;
+  if (input.backupAdhoc || !input.vendorCdHash || !input.backupCdHash || input.backupCdHash !== input.vendorCdHash) return "refuse";
+  return "restore";
 }
 
 export function resolveMacInstallTarget(requested: string, legacy: { original?: string } | null, root = dataRoot): string {
@@ -878,6 +916,108 @@ export async function uninstallMacApp(options: MacInstallOptions = {}) {
         : "The app changed after patching. Restore would overwrite an update, so it has been refused.");
     }
     return restoreInstalledApp(record, options);
+  });
+}
+
+async function assertMacAppNotRunning(installedApp: string, options: MacInstallOptions): Promise<void> {
+  if (options.assertClosed) {
+    await options.assertClosed(installedApp);
+    return;
+  }
+  const listed = await runnerFor(options)("/bin/ps", ["-axo", "pid=,comm="]);
+  if (appPids(`${listed.stdout ?? ""}\n${listed.stderr ?? ""}`, installedApp).length > 0) {
+    throw new Error("T3 is open. Close it before preparing the native update. No app files have been changed.");
+  }
+}
+
+function preparationRefusal(liveHash: string, record: MacInstallRecord, basePlan: NativeRestoreAction): Error {
+  if (basePlan === "restore") return new Error("The saved backup is not a verified vendor-signed app. Native update preparation refused.");
+  if (liveHash === record.patchedHash) return new Error("The backup checksum no longer matches. Restore refused.");
+  return new Error("The app changed after patching. Restore would overwrite an update, so it has been refused.");
+}
+
+// Closed-app recovery for T3's own updater. This does not set a feed URL,
+// disable signature checks, or replace updater errors. It restores the
+// verified vendor bundle only while T3 is closed and the live archive is
+// still the recorded patch. nativeUpdaterVerified stays false.
+export async function prepareMacNativeUpdate(options: MacInstallOptions = {}): Promise<MacNativeUpdatePreparation> {
+  assertMac(options);
+  return withLock(async () => {
+    const record = await readRecord();
+    if (!record) throw new Error("No macOS installation record found.");
+    await assertMacAppNotRunning(record.installedApp, options);
+    await restoreInterruptedInstall(record.installedApp);
+    const liveHash = await sha256(record.archive);
+    const inspection = await inspectArchive(record.archive);
+    const backupArchive = path.join(record.bundleBackup, "Contents", "Resources", "app.asar");
+    const backupHash = await exists(backupArchive) ? await sha256(backupArchive) : null;
+    const basePlan = macRestorePlan({
+      liveHash,
+      recordedPatchedHash: record.patchedHash,
+      backupHash,
+      recordedOriginalHash: record.originalHash,
+      recognized: inspection.recognized,
+      markerFree: inspection.markerFree,
+    });
+    let backupAdhoc = true;
+    let backupCdHash: string | null = null;
+    if (basePlan === "restore") {
+      const signed = await signatureDetails(record.bundleBackup, options);
+      backupAdhoc = signed.adhoc;
+      backupCdHash = signed.cdhash;
+    }
+    const plan = macNativeUpdatePreparationPlan({
+      liveHash,
+      recordedPatchedHash: record.patchedHash,
+      backupHash,
+      recordedOriginalHash: record.originalHash,
+      recognized: inspection.recognized,
+      markerFree: inspection.markerFree,
+      backupAdhoc,
+      backupCdHash,
+      vendorCdHash: record.vendorCdHash,
+    });
+    switch (plan) {
+      case "keep-update":
+        return withUpdater({
+          action: "kept-update",
+          prepared: true,
+          restored: false,
+          keptUpdate: true,
+          installedApp: record.installedApp,
+          original: record.installedApp,
+          archive: record.archive,
+          executable: record.executable,
+          appVersion: inspection.version || record.appVersion,
+          patchedInPlace: true,
+          signature: record.signature,
+        });
+      case "refuse":
+        throw preparationRefusal(liveHash, record, basePlan);
+      case "restore": {
+        options.onProgress?.("Restoring the verified original signed app");
+        const restored = await restoreInstalledApp(record, options);
+        return {
+          action: "restored-vendor" as const,
+          prepared: true as const,
+          restored: true,
+          keptUpdate: false,
+          installedApp: restored.installedApp,
+          original: restored.original,
+          archive: restored.archive,
+          executable: restored.executable,
+          appVersion: restored.appVersion,
+          patchedInPlace: true as const,
+          signature: restored.signature,
+          updaterEnabled: true as const,
+          nativeUpdaterVerified: false as const,
+        };
+      }
+      default: {
+        const unreachable: never = plan;
+        throw new Error(`Unexpected native update preparation: ${String(unreachable)}`);
+      }
+    }
   });
 }
 

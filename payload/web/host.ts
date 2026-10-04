@@ -5,7 +5,8 @@ import { database } from "./database.ts";
 import type { PendingRecord, PendingSource } from "./database.ts";
 import { ModRuntime } from "./runtime.ts";
 import { MODS_ICON, attachSidebarButton, composer, dockAboveComposer, insertDraft, readDraft, sidebarFooter } from "./adapter.ts";
-import { authorPrompt, fixPrompt } from "./author.ts";
+import { authorPrompt, editPrompt, fixPrompt } from "./author.ts";
+import type { EditSource } from "./author.ts";
 import { style } from "./style.ts";
 import { ThemeHost } from "./themes.ts";
 import { routePath } from "./route.ts";
@@ -14,6 +15,8 @@ type MenuEntry = readonly [text: string, action: () => void, className?: string]
 type SeenInbox = { [hash: string]: number };
 // What the manager shows instead of the tabs: a review of a pending or built-in bundle, or an installed mod's details.
 type Review = { bundle: ModBundle; entry?: PendingRecord; detailsOnly?: boolean };
+// The Edit form for an installed or built-in mod, and the view Cancel returns to.
+type Editing = { id: string; back?: Review };
 // A complete bundle from chat that cannot be installed as sent. Kept visible until dismissed or replaced.
 type Problem = { hash: string; id?: string; name: string; error: string };
 type Flash = { tone: "error" | "info"; text: string };
@@ -195,6 +198,9 @@ export async function mount(options: MountOptions): Promise<void> {
   const problems: Problem[] = [];
   let tab = "installed";
   let review: Review | undefined;
+  let editing: Editing | undefined;
+  // Requested changes per mod id, kept across re-renders, errors, and closing the manager.
+  const editTexts = new Map<string, string>();
   let flash: Flash | undefined;
   let createText = "";
   let importText = "";
@@ -305,9 +311,9 @@ export async function mount(options: MountOptions): Promise<void> {
     styleSettingsControl(false);
   }
   function closeManager(): void { if (inlineContent) leaveInline(); else dialog.close(); }
-  function go(key: string): void { tab = key; review = undefined; flash = undefined; render(); }
+  function go(key: string): void { tab = key; review = undefined; editing = undefined; flash = undefined; render(); }
   function showReview(next: Review): void {
-    review = next; flash = undefined;
+    review = next; editing = undefined; flash = undefined;
     render(); if (!dialog.open) dialog.showModal();
   }
 
@@ -392,7 +398,7 @@ export async function mount(options: MountOptions): Promise<void> {
     return runtime ? ["Starting", "starting"] : ["Off", "off"];
   }
   const recordFor = (id: string) => records.find((record) => record.manifest.id === id);
-  function refresh(): void { if (dialog.open && !review && !busy && (tab === "installed" || tab === "examples")) render(); renderTray(); }
+  function refresh(): void { if (dialog.open && !review && !editing && !busy && (tab === "installed" || tab === "examples")) render(); renderTray(); }
   function start(record: ModRecord): void {
     if (paused || options.safeMode || !record.enabled || record.quarantined || runtimes.has(record.manifest.id)) return;
     const runtime = new ModRuntime(record, {
@@ -440,9 +446,10 @@ export async function mount(options: MountOptions): Promise<void> {
     for (const record of records) start(record);
     refresh();
   }
-  // Without a tab, reopening resumes a pending review; it is also listed under Waiting for review.
+  // Without a tab, reopening resumes a pending review or an unfinished edit; reviews are also listed under Waiting for review.
   function open(nextTab?: string): void {
     leaveInline();
+    if (nextTab) editing = undefined;
     if (nextTab || !review?.entry) { tab = nextTab ?? "installed"; review = undefined; }
     flash = undefined; render(); if (!dialog.open) dialog.showModal();
   }
@@ -596,11 +603,23 @@ export async function mount(options: MountOptions): Promise<void> {
     const anchor = node("a", { href: url, download: `${record.manifest.id}.t3mod` });
     document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  function draftInChat(text: string): void {
+  function draftInChat(text: string | (() => string), done?: () => void): void {
     void run(async () => {
+      const request = typeof text === "string" ? text : text();
       if (!composer()) throw new Error("Open a chat thread first, then try again. The request goes into that thread’s composer.");
-      closeManager(); insertDraft((readDraft() ? "\n\n" : "") + text);
+      closeManager(); insertDraft((readDraft() ? "\n\n" : "") + request); done?.();
     });
+  }
+  // Edits start from the installed copy, keeping earlier changes; otherwise from the included built-in.
+  function editSource(id: string): EditSource | undefined {
+    const installed = recordFor(id);
+    const example = (options.examples ?? []).find((item) => item.manifest.id === id);
+    if (installed) return { bundle: validateBundle(installed), installed: true, builtIn: Boolean(example) };
+    return example ? { bundle: validateBundle(example), installed: false, builtIn: true } : undefined;
+  }
+  function showEdit(id: string, back?: Review): void {
+    editing = { id, ...(back ? { back } : {}) }; review = undefined; flash = undefined;
+    render(); if (!dialog.open) dialog.showModal();
   }
   async function install(current: Review): Promise<void> {
     const { bundle, entry } = current;
@@ -639,7 +658,7 @@ export async function mount(options: MountOptions): Promise<void> {
     const { manifest } = record;
     const count = manifest.permissions.length;
     const reason = record.quarantined;
-    const items: MenuEntry[] = [["Details", () => showReview({ bundle: validateBundle(record), detailsOnly: true })]];
+    const items: MenuEntry[] = [["Details", () => showReview({ bundle: validateBundle(record), detailsOnly: true })], ["Edit", () => showEdit(manifest.id)]];
     if (reason) items.push(["Ask AI to fix", () => draftInChat(fixPrompt(manifest.name, manifest.id, manifest.version, reason))]);
     items.push(["Export", () => download(record)], ["Remove", () => void run(async () => {
       if (!await ask(`Remove ${manifest.name}?`, "The mod and its private data will be removed. Export it first if you want a copy.", "Remove mod", true)) return;
@@ -672,6 +691,7 @@ export async function mount(options: MountOptions): Promise<void> {
     const actions: Node[] = [button("Import", () => go("import"), "xs")];
     if (!inlineContent) actions.push(closeButton(closeManager));
     dialog.replaceChildren(node("header", {}, [node("div", {}, [node("h1", { text: "Mods" }), node("p", { text: "Local add-ons for T3 Code. Each mod runs isolated and can be switched off at any time." })]), node("div", { class: "header-actions" }, actions)]));
+    if (editing) { renderEdit(editing); return; }
     if (review) { renderReview(review); return; }
     const waiting = pending.length + problems.length;
     dialog.append(node("nav", { class: "tabs", "aria-label": "Mod manager" }, [["installed", "Installed"], ["examples", "Built-in"], ["commands", "Commands"], ["create", "Create"], ["console", "Activity"]].map(([key = "", text = ""]) => {
@@ -700,14 +720,19 @@ export async function mount(options: MountOptions): Promise<void> {
         const bundle = validateBundle(example);
         const { manifest } = bundle;
         const installed = recordFor(manifest.id);
-        if (!installed) return row(manifest.name, manifest.description, [button("Review", () => showReview({ bundle }), "xs")], [meta(`${manifest.version} · not installed`)]);
+        const more = moreButton(`More actions for ${manifest.name}`, [["Edit", () => showEdit(manifest.id)]]);
+        if (!installed) {
+          const element = row(manifest.name, manifest.description, [more, button("Review", () => showReview({ bundle }), "xs")], [meta(`${manifest.version} · not installed`)]);
+          element.dataset.example = manifest.id; return element;
+        }
         const current = sameBundle(installed, bundle);
         const element = row([document.createTextNode(manifest.name), stateBadge(installed)], manifest.description, [
+          more,
           ...(current ? [] : [button("Review update", () => showReview({ bundle }), "xs")]),
           ...(installed.quarantined && !options.safeMode ? [button("Retry", () => retry(installed), "xs")] : []),
           enableToggle(installed),
         ], [meta(current ? `${manifest.version} · installed` : `${installed.manifest.version} installed · ${manifest.version} included`)]);
-        element.dataset.mod = manifest.id; return element;
+        element.dataset.mod = manifest.id; element.dataset.example = manifest.id; return element;
       });
       content.append(section("Built-in", list.length ? list : [note("No built-in mods in this build.")]), node("p", { class: "explain", text: "Included with Mods for T3 Code. Review one to install it; it starts right away and you can switch it off here or under Installed. Themes use T3’s own color tokens and restore your appearance when turned off." }));
     } else if (tab === "commands") {
@@ -775,12 +800,48 @@ export async function mount(options: MountOptions): Promise<void> {
     const footer = node("div", { class: "footer actions" });
     if (detailsOnly) {
       content.append(node("details", {}, [node("summary", { text: "JavaScript source" }), node("pre", { class: "review-code", text: bundle.code })]));
-      footer.append(button("Done", () => { review = undefined; render(); }, "xs")); dialog.append(content, footer); return;
+      footer.append(button("Edit", () => showEdit(manifest.id, current), "xs"), button("Done", () => { review = undefined; render(); }, "xs")); dialog.append(content, footer); return;
     }
     content.append(node("p", { class: "explain", text: `Install code from authors you trust. ${updating ? "The update replaces the running version as soon as you confirm." : "The mod starts as soon as you install it."} Mod code is isolated from T3’s files and credentials, but a mod can consume browser resources and use every permission listed above.` }), node("details", {}, [node("summary", { text: "Review JavaScript source" }), node("pre", { class: "review-code", text: bundle.code })]));
     const confirm = button(updating ? "Update mod" : "Install mod", () => void run(() => install(current)), "primary xs");
     if (entry) footer.append(button("Dismiss", () => void run(() => dismiss(entry)), "ghost xs start"), button("Not now", () => { review = undefined; tab = "installed"; render(); }, "xs"), confirm);
-    else footer.append(button("Cancel", () => { review = undefined; render(); }, "xs"), confirm);
+    else footer.append(...(previous ? [] : [button("Edit", () => showEdit(manifest.id, current), "ghost xs start")]), button("Cancel", () => { review = undefined; render(); }, "xs"), confirm);
+    dialog.append(content, footer);
+  }
+  // Asks the open chat's AI for an edited version. It returns through Waiting for review like any reply.
+  function renderEdit(current: Editing): void {
+    const { id } = current;
+    const source = editSource(id);
+    const back = () => { editing = undefined; review = current.back; flash = undefined; render(); };
+    const content = node("div", { class: "content" });
+    const footer = node("div", { class: "footer actions" });
+    if (flash) content.append(node("p", { class: "flash", "data-tone": flash.tone, role: flash.tone === "error" ? "alert" : "status", text: flash.text }));
+    if (!source) { content.append(node("p", { class: "explain", text: "This mod is no longer installed." })); footer.append(button("Back", back, "xs")); dialog.append(content, footer); return; }
+    const { manifest } = source.bundle;
+    const waiting = pending.some((entry) => entry.bundle.manifest.id === id);
+    content.append(node("div", { class: "review-title" }, [
+      node("h2", { text: `Edit ${manifest.name}` }),
+      node("p", { class: "explain", text: manifest.description }),
+      meta([manifest.version, manifest.author, source.installed ? "Installed" : "Built-in · not installed"].join(" · ")),
+    ]));
+    const text = node("textarea", { placeholder: "Also show the context window size, use shorter labels…", "aria-label": `Changes for ${manifest.name}`, maxLength: 5000, value: editTexts.get(id) ?? "" });
+    text.oninput = () => { editTexts.set(id, text.value); };
+    const request = () => {
+      const change = (editTexts.get(id) ?? "").trim();
+      if (!change) throw new Error("Describe what should change first.");
+      const latest = editSource(id);
+      if (!latest) throw new Error(`${manifest.name} is no longer installed.`);
+      return editPrompt(change, latest, options.inbox);
+    };
+    content.append(section("Changes", [node("div", { class: "body" }, [
+      node("label", { text: "What should change?" }), text,
+      node("p", { class: "explain", text: `Draft in T3 adds a request with ${source.installed ? "your installed copy’s" : "this mod’s"} complete code to the open chat’s composer. Send it with the model and account you already use. The edited mod keeps its id and appears under Waiting for review; ${source.installed ? "the installed version keeps running until you review the update." : "nothing is installed until you review it."}${waiting ? " It replaces the update already waiting for review." : ""}` }),
+    ])]));
+    footer.append(
+      button("Cancel", back, "xs"),
+      button("Copy request", () => void run(async () => { await navigator.clipboard.writeText(request()); flash = { tone: "info", text: "Request copied. Paste it into a T3 chat and send it." }; }), "xs"),
+      button("Draft in T3", () => draftInChat(request, () => { editTexts.delete(id); editing = undefined; }), "primary xs"),
+    );
     dialog.append(content, footer);
   }
   function onInput(event: Event): void {

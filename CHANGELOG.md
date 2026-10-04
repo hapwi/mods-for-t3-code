@@ -4,6 +4,8 @@
 
 ### Added
 
+- Add macOS `prepare-update` recovery, available directly through curl with `--prepare-update`, to restore the verified vendor-signed app while T3 is closed, preserving private mod data and refusing to overwrite upstream replacements; native updater compatibility remains unverified.
+- Add Edit for installed and built-in mods, drafting changes with the current source into the existing T3 chat and returning edited versions through mod review.
 - Install the Patcher changelog policy for ongoing changes and explicitly authorized releases.
 - Add the MIT-licensed Mods for T3 Code host, sidebar and Settings entries, live mod management, commands, panels, permission review, and isolated worker runtimes.
 - Create mods through the current T3 composer and provider account, with a watched inbox for immediate import review.
@@ -17,10 +19,13 @@
 
 ### Changed
 
+- Retain only the compiled runtime and maintenance files on new curl/PowerShell installations; remove the temporary source download after installation.
 - Convert production code, example mods, the SDK and development scripts to strict TypeScript; ship the compiled CLI at `dist/cli.mjs` so end-user installation needs no compiler or npm dependencies.
 
 ### Fixed
 
+- Hide Token Weather before context measurements arrive and omit the first-turn delta placeholder; show a delta only after two completed measured turns.
+- Give composer bands an opaque theme background that masks scrolling conversation text while keeping the Stash tab visible.
 - Deliver custom mods from completed native AI replies and cached projections without requiring visible chat blocks or local files; accept separate manifest/code blocks, persist pending reviews, deduplicate deliveries, and show validation errors with an AI repair action.
 - Show installed built-ins and accurate Starting, Active, Stopped, Off, Paused, and Safe mode states; add live toggles, retry actions, and file-or-paste import while preserving drafts and reviews across manager navigation.
 - Apply theme mods to T3's native chrome, selected-theme sources, and sidebar overrides; restore previous inline colors and priorities when disabled.
