@@ -179,15 +179,27 @@ export async function mount(options: MountOptions): Promise<void> {
   const panelRoot = node("div", { "data-t3mods": "panels" });
   const panelShadow = panelRoot.attachShadow({ mode: "open" });
   panelShadow.append(node("style", { text: style }));
-  const bandRoot = node("div", { "data-t3mods": "bands", style: "display:block;width:100%;max-width:var(--chat-content-max-width,none);margin-inline:auto" });
+  const composerRoot = node("div", { "data-t3mods": "composer", "data-chat-composer-collapsed-controls": "true", style: "display:flex;align-items:center;width:100%;max-width:var(--chat-content-max-width,none);margin-inline:auto" });
+  const bandRoot = node("div", { "data-t3mods": "bands", style: "display:none;flex:1;min-width:0" });
   const bandShadow = bandRoot.attachShadow({ mode: "open" });
   const bandStack = node("div", { class: "band-stack" });
   bandShadow.append(node("style", { text: style }), bandStack);
-  const bandDock = dockAboveComposer(bandRoot);
-  const contextRoot = node("div", { "data-t3mods": "context", style: "display:flex;align-items:center;flex:none" });
+  composerRoot.append(bandRoot);
+  const bandDock = dockAboveComposer(composerRoot);
+  let bandsVisible = false;
+  let contextAboveComposer = false;
+  const contextRoot = node("div", { "data-t3mods": "context", "data-composer-context-control": "true", "data-chat-composer-floating-layer": "true", style: "display:flex;align-items:center;flex:none" });
   const contextShadow = contextRoot.attachShadow({ mode: "open" });
   contextShadow.append(node("style", { text: style }));
-  const contextDock = dockContextControl(contextRoot);
+  const contextDock = dockContextControl(contextRoot, visible => {
+    contextAboveComposer = visible;
+    if (visible) {
+      contextRoot.style.paddingLeft = "16px";
+      contextRoot.style.background = "var(--background,#0a0a0a)";
+      if (contextRoot.parentElement !== composerRoot) composerRoot.insertBefore(contextRoot, bandRoot);
+    } else if (contextRoot.parentElement === composerRoot) contextRoot.remove();
+    bandDock.show(bandsVisible || contextAboveComposer);
+  });
   const contextViews = new Map<string, ContextUsageView>();
   let records: ModRecord[] = [];
   const runtimes = new Map<string, ModRuntime>();
@@ -354,7 +366,9 @@ export async function mount(options: MountOptions): Promise<void> {
       const name = runtime.record.manifest.name;
       rows.push(node("div", { class: "band", title: name, "aria-label": `${name}: ${parts.map((part) => part.text).join("")}`, "data-mod": id }, parts.map((part) => node("span", { "data-tone": part.tone ?? "default", text: part.text }))));
     }
-    bandStack.replaceChildren(...rows); bandDock.show(rows.length > 0);
+    bandStack.replaceChildren(...rows);
+    bandsVisible = rows.length > 0; bandRoot.style.display = bandsVisible ? "block" : "none";
+    bandDock.show(bandsVisible || contextAboveComposer);
   }
   // Measurements come only from the trusted preload and only for the open thread.
   function renderContext(): void {

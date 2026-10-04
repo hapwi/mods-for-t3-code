@@ -38,8 +38,15 @@ try {
   };
   const deadline = Date.now() + 40000;
   for (;;) {
-    const result = await rpc("Runtime.evaluate", { expression: 'JSON.stringify({status:document.querySelector("#smoke-result")?.dataset.status,text:document.querySelector("#smoke-result")?.textContent})', returnByValue: true });
+    const result = await rpc("Runtime.evaluate", { expression: 'JSON.stringify({status:document.querySelector("#smoke-result")?.dataset.status,text:document.querySelector("#smoke-result")?.textContent,input:window.__contextUsageInput})', returnByValue: true });
     const value = JSON.parse(result.result.value);
+    if (contextUsage && value.input) {
+      const { x, y } = value.input;
+      await rpc("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+      await rpc("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+      await rpc("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
+      await rpc("Runtime.evaluate", { expression: "window.__contextUsageInput = null" });
+    }
     if (value.status === "capture" && capturePath) {
       const capture = await rpc("Page.captureScreenshot", { format: "png" }) as unknown as { data: string };
       await writeFile(capturePath, Buffer.from(capture.data, "base64"));

@@ -497,14 +497,12 @@
     if (!event.defaultPrevented) throw new Error("This T3 editor does not support the paste adapter. Copy the text and paste it manually.");
   }
   var FLOATING = { position: "absolute", left: "0", width: "auto", maxWidth: "none", margin: "0", zIndex: "30", pointerEvents: "none" };
-  function dockContextControl(element2) {
-    const fallback = dockAboveComposer(element2);
+  function dockContextControl(element2, fallback) {
     let wanted = false;
     let meter = null;
     let original;
     let frame;
     const initialStyle = element2.style.cssText;
-    let inNativeSlot = false;
     function restore() {
       if (meter && original) {
         if (original.value) meter.style.setProperty("display", original.value, original.priority);
@@ -517,8 +515,8 @@
       frame = void 0;
       if (!wanted) {
         restore();
-        inNativeSlot = false;
-        fallback.show(false);
+        fallback(false);
+        element2.remove();
         return;
       }
       const editor = composer();
@@ -530,20 +528,14 @@
         if (meter) original = { value: meter.style.getPropertyValue("display"), priority: meter.style.getPropertyPriority("display") };
       }
       if (meter?.parentElement) {
-        if (!inNativeSlot) {
-          fallback.show(false);
-          element2.style.cssText = initialStyle;
-          inNativeSlot = true;
-        }
+        fallback(false);
+        element2.style.cssText = initialStyle;
         if (element2.nextSibling !== meter) meter.before(element2);
         meter.style.setProperty("display", "none", "important");
-      } else {
-        inNativeSlot = false;
-        fallback.show(true);
-      }
+      } else fallback(true);
     }
     function schedule() {
-      if (frame === void 0) frame = requestAnimationFrame(place);
+      if (wanted && frame === void 0) frame = requestAnimationFrame(place);
     }
     const observer = new MutationObserver(schedule);
     observer.observe(document.body, { childList: true, subtree: true });
@@ -553,10 +545,12 @@
         place();
       },
       dispose() {
+        wanted = false;
         observer.disconnect();
         if (frame !== void 0) cancelAnimationFrame(frame);
         restore();
-        fallback.dispose();
+        fallback(false);
+        element2.remove();
       }
     };
   }
@@ -891,7 +885,7 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
 .panel-tray[data-docked]{position:relative;inset:auto;width:100%;max-height:30vh;box-shadow:none;z-index:auto;margin-bottom:8px;background:var(--mf-card)}
 @media(max-width:600px){header{padding:16px 16px 10px}.tabs{margin-inline:16px;max-width:calc(100% - 32px)}.content{padding:12px 16px 16px}.row{flex-direction:column;align-items:stretch;gap:8px}.row-actions{justify-content:flex-start;flex-wrap:wrap}.panel-tray{width:280px}}
 .band-stack{width:fit-content;max-width:100%;padding:2px 16px 6px;border-top-right-radius:var(--mf-control-radius);background:var(--mf-bg);font-size:12px;line-height:16px;color:var(--mf-muted)}.band{white-space:pre;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}.band [data-tone=muted]{color:var(--mf-muted)}.band [data-tone=yellow]{color:var(--color-yellow-500,#d4a72c)}.band [data-tone=cyan]{color:var(--color-cyan-500,#22a8bd)}.band [data-tone=blue]{color:var(--info,var(--color-blue-500,#3b82f6))}.band [data-tone=magenta]{color:var(--color-fuchsia-500,#c85bd8)}.band [data-tone=red]{color:var(--destructive,#e5534b)}
-.context-widget{display:flex;align-items:center;gap:3px;pointer-events:auto}.context-widget[hidden]{display:none}.context-trigger{width:28px;height:28px;padding:4px}.context-trigger svg{width:20px;height:20px;transform:rotate(-90deg)}.context-ring-track{stroke:color-mix(in srgb,var(--mf-muted) 24%,transparent)}.context-ring-fill{stroke:color-mix(in srgb,var(--mf-muted) 72%,transparent);stroke-linecap:round;transition:stroke-dashoffset .5s ease-out,stroke .5s ease-out}.context-widget[data-level=high] .context-ring-fill{stroke:var(--color-error,var(--mf-danger))}.context-widget[data-unknown=true] .context-ring-track{stroke-dasharray:3 3}.context-percent{font-size:11px;color:var(--mf-muted);font-variant-numeric:tabular-nums}
+.context-widget{display:flex;align-items:center;gap:3px;pointer-events:auto}.context-widget[hidden]{display:none}.context-trigger{width:auto;min-width:28px;height:28px;padding:4px;gap:3px}.context-trigger svg{width:20px;height:20px;transform:rotate(-90deg)}.context-ring-track{stroke:color-mix(in srgb,var(--mf-muted) 24%,transparent)}.context-ring-fill{stroke:color-mix(in srgb,var(--mf-muted) 72%,transparent);stroke-linecap:round;transition:stroke-dashoffset .5s ease-out,stroke .5s ease-out}.context-widget[data-level=high] .context-ring-fill{stroke:var(--color-error,var(--mf-danger))}.context-widget[data-unknown=true] .context-ring-track{stroke-dasharray:3 3}.context-percent:empty{display:none}.context-percent{font-size:11px;color:var(--mf-muted);font-variant-numeric:tabular-nums}
 .context-popup{position:fixed;inset:auto;margin:0;width:min(430px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;padding:0;border:1px solid var(--mf-border);border-radius:calc(var(--mf-radius) + 4px);background:var(--mf-popover);color:var(--mf-fg);box-shadow:0 8px 24px #00000029;pointer-events:auto;white-space:normal}.context-header{padding:12px 16px 4px;align-items:center;gap:12px}.context-header h2{font-size:13px;font-weight:500;color:var(--mf-muted)}.context-content{padding:8px 16px 16px;display:flex;flex-direction:column;gap:12px}.context-summary{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--mf-muted);font-variant-numeric:tabular-nums}.context-bar{display:flex;gap:1px;height:6px;flex:none;overflow:hidden;border-radius:999px;background:color-mix(in srgb,var(--mf-muted) 24%,transparent)}.context-segment{height:100%;flex-shrink:1;border-radius:2px}.context-breakdown{display:flex;flex-direction:column;gap:10px;margin:2px 0 0;font-size:12px}.context-category{display:flex;align-items:center;justify-content:space-between;gap:16px}.context-category dt{display:flex;align-items:center;gap:8px;min-width:0}.context-category dd{margin:0;color:var(--mf-muted);font-variant-numeric:tabular-nums;flex:none}.context-category .context-unavailable{font-size:11px;color:color-mix(in srgb,var(--mf-muted) 75%,transparent)}.context-swatch{width:10px;height:10px;flex:none;border-radius:2px}.context-note{font-size:11px;line-height:1.5;color:var(--mf-muted)}@media(prefers-reduced-motion:reduce){.context-ring-fill{transition:none}}
 `;
 
@@ -1128,7 +1122,7 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
   var sequence = 0;
   var ContextUsageView = class {
     root = element("div", "context-widget");
-    trigger = element("button", "context-trigger ghost icon");
+    trigger = element("button", "context-trigger ghost");
     popup = element("div", "context-popup");
     content = element("div", "context-content");
     label = element("span", "context-percent");
@@ -1142,6 +1136,7 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
       this.popup.id = `t3mods-context-${++sequence}`;
       this.popup.popover = "auto";
       this.popup.role = "dialog";
+      this.popup.setAttribute("data-chat-composer-floating-layer", "true");
       this.popup.setAttribute("aria-label", "Context Usage");
       this.trigger.setAttribute("aria-controls", this.popup.id);
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -1155,7 +1150,7 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
       this.arc = svg.lastElementChild;
       this.arc.setAttribute("pathLength", "100");
       this.arc.setAttribute("stroke-dasharray", "100");
-      this.trigger.append(svg);
+      this.trigger.append(svg, this.label);
       const close = element("button", "ghost icon xs", "\xD7");
       close.type = "button";
       close.setAttribute("aria-label", "Close context usage");
@@ -1178,7 +1173,7 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
         this.trigger.setAttribute("aria-expanded", String(this.popup.matches(":popover-open")));
       });
       this.popup.addEventListener("keydown", (event) => event.stopPropagation());
-      this.root.append(this.trigger, this.label, this.popup);
+      this.root.append(this.trigger, this.popup);
       window.addEventListener("resize", this.position);
       window.addEventListener("scroll", this.position, true);
     }
@@ -1376,15 +1371,27 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
     const panelRoot = node("div", { "data-t3mods": "panels" });
     const panelShadow = panelRoot.attachShadow({ mode: "open" });
     panelShadow.append(node("style", { text: style }));
-    const bandRoot = node("div", { "data-t3mods": "bands", style: "display:block;width:100%;max-width:var(--chat-content-max-width,none);margin-inline:auto" });
+    const composerRoot = node("div", { "data-t3mods": "composer", "data-chat-composer-collapsed-controls": "true", style: "display:flex;align-items:center;width:100%;max-width:var(--chat-content-max-width,none);margin-inline:auto" });
+    const bandRoot = node("div", { "data-t3mods": "bands", style: "display:none;flex:1;min-width:0" });
     const bandShadow = bandRoot.attachShadow({ mode: "open" });
     const bandStack = node("div", { class: "band-stack" });
     bandShadow.append(node("style", { text: style }), bandStack);
-    const bandDock = dockAboveComposer(bandRoot);
-    const contextRoot = node("div", { "data-t3mods": "context", style: "display:flex;align-items:center;flex:none" });
+    composerRoot.append(bandRoot);
+    const bandDock = dockAboveComposer(composerRoot);
+    let bandsVisible = false;
+    let contextAboveComposer = false;
+    const contextRoot = node("div", { "data-t3mods": "context", "data-composer-context-control": "true", "data-chat-composer-floating-layer": "true", style: "display:flex;align-items:center;flex:none" });
     const contextShadow = contextRoot.attachShadow({ mode: "open" });
     contextShadow.append(node("style", { text: style }));
-    const contextDock = dockContextControl(contextRoot);
+    const contextDock = dockContextControl(contextRoot, (visible) => {
+      contextAboveComposer = visible;
+      if (visible) {
+        contextRoot.style.paddingLeft = "16px";
+        contextRoot.style.background = "var(--background,#0a0a0a)";
+        if (contextRoot.parentElement !== composerRoot) composerRoot.insertBefore(contextRoot, bandRoot);
+      } else if (contextRoot.parentElement === composerRoot) contextRoot.remove();
+      bandDock.show(bandsVisible || contextAboveComposer);
+    });
     const contextViews = /* @__PURE__ */ new Map();
     let records = [];
     const runtimes = /* @__PURE__ */ new Map();
@@ -1601,7 +1608,9 @@ dialog[data-inline]>header,dialog[data-inline]>.content,dialog[data-inline]>.foo
         rows.push(node("div", { class: "band", title: name, "aria-label": `${name}: ${parts.map((part) => part.text).join("")}`, "data-mod": id }, parts.map((part) => node("span", { "data-tone": part.tone ?? "default", text: part.text }))));
       }
       bandStack.replaceChildren(...rows);
-      bandDock.show(rows.length > 0);
+      bandsVisible = rows.length > 0;
+      bandRoot.style.display = bandsVisible ? "block" : "none";
+      bandDock.show(bandsVisible || contextAboveComposer);
     }
     function renderContext() {
       const usage = currentUsage();

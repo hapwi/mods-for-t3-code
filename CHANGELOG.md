@@ -29,6 +29,8 @@
 
 ### Fixed
 
+- Keep Context Usage and Token Weather in one shared composer dock on layouts without a native meter, preventing overlap and repeated moves that close the inspector; make the ring and percentage clickable and mark the control and popup for T3's composer event handling.
+
 - Update unchanged older installed Token Weather bundles when the host loads, so empty conversations and first turns receive the quiet-state fix; preserve edited mods, enabled state, and private history.
 - Hide Token Weather before context measurements arrive and omit the first-turn delta placeholder; show a delta only after two completed measured turns.
 - Give composer bands an opaque theme background that masks scrolling conversation text while keeping the Stash tab visible.

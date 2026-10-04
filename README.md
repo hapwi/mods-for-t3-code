@@ -60,7 +60,7 @@ Prompt modifications ask before inserting into the draft and never send it. Mult
 
 ### Context Usage
 
-Install **Context Usage** from **Mods → Built-in**. A compact progress ring and percentage appear in the native composer meter slot; click the ring to open **Context Usage** with measured tokens, window capacity, a segmented bar, and category rows matching the Cursor-style inspector. Escape, clicking outside, or the close button dismisses it. Disabling the mod restores T3’s original meter. Older layouts show the control above the composer.
+Install **Context Usage** from **Mods → Built-in**. A compact progress ring and percentage appear in the native composer meter slot; click either to open **Context Usage** with measured tokens, window capacity, a segmented bar, and category rows matching the Cursor-style inspector. Escape, clicking outside, or the close button dismisses it. Disabling the mod restores T3’s original meter. Older layouts place the control alongside Token Weather in a shared dock above the composer.
 
 The categories are System prompt, Tool definitions, Rules, Skills, MCP & dynamic tools, Summarized conversation, and Conversation. T3’s current usage contract reports the total but does **not** provide these category counts. They show **Unavailable**, with the measured total under **Unclassified context**; nothing is estimated or shown as a fabricated zero. A numeric `breakdown` from T3 can populate the categories when available. The ring stays hidden before a measurement and handles unknown window sizes without guessing.
 

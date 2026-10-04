@@ -28,7 +28,7 @@ let sequence = 0;
 /** All content and measurements are host-owned; workers cannot inject markup or counts. */
 export class ContextUsageView {
   readonly root = element("div", "context-widget");
-  private readonly trigger = element("button", "context-trigger ghost icon");
+  private readonly trigger = element("button", "context-trigger ghost");
   private readonly popup = element("div", "context-popup");
   private readonly content = element("div", "context-content");
   private readonly label = element("span", "context-percent");
@@ -43,6 +43,7 @@ export class ContextUsageView {
     this.popup.id = `t3mods-context-${++sequence}`;
     this.popup.popover = "auto";
     this.popup.role = "dialog";
+    this.popup.setAttribute("data-chat-composer-floating-layer", "true");
     this.popup.setAttribute("aria-label", "Context Usage");
     this.trigger.setAttribute("aria-controls", this.popup.id);
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -55,7 +56,7 @@ export class ContextUsageView {
     this.arc = svg.lastElementChild as SVGCircleElement;
     this.arc.setAttribute("pathLength", "100");
     this.arc.setAttribute("stroke-dasharray", "100");
-    this.trigger.append(svg);
+    this.trigger.append(svg, this.label);
     const close = element("button", "ghost icon xs", "×");
     close.type = "button"; close.setAttribute("aria-label", "Close context usage");
     close.onclick = () => { this.popup.hidePopover(); this.trigger.focus(); };
@@ -71,7 +72,7 @@ export class ContextUsageView {
     });
     // Prevent composer shortcuts from handling keys intended for the inspector.
     this.popup.addEventListener("keydown", event => event.stopPropagation());
-    this.root.append(this.trigger, this.label, this.popup);
+    this.root.append(this.trigger, this.popup);
     window.addEventListener("resize", this.position);
     window.addEventListener("scroll", this.position, true);
   }

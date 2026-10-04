@@ -35,14 +35,12 @@ export function insertDraft(text: string): void {
 // before the form. React can replace any of these nodes; reattach when it does.
 const FLOATING = { position: "absolute", left: "0", width: "auto", maxWidth: "none", margin: "0", zIndex: "30", pointerEvents: "none" };
 /** Replace the native meter's footprint, preserving its inline display for restoration. */
-export function dockContextControl(element: HTMLElement): { show(value: boolean): void; dispose(): void } {
-  const fallback = dockAboveComposer(element);
+export function dockContextControl(element: HTMLElement, fallback: (visible: boolean) => void): { show(value: boolean): void; dispose(): void } {
   let wanted = false;
   let meter: HTMLButtonElement | null = null;
   let original: { value: string; priority: string } | undefined;
   let frame: number | undefined;
   const initialStyle = element.style.cssText;
-  let inNativeSlot = false;
   function restore(): void {
     if (meter && original) {
       if (original.value) meter.style.setProperty("display", original.value, original.priority);
@@ -52,7 +50,7 @@ export function dockContextControl(element: HTMLElement): { show(value: boolean)
   }
   function place(): void {
     frame = undefined;
-    if (!wanted) { restore(); inNativeSlot = false; fallback.show(false); return; }
+    if (!wanted) { restore(); fallback(false); element.remove(); return; }
     const editor = composer();
     const form = editor?.closest("[data-chat-composer-form]") ?? editor?.closest("form");
     // ContextWindowMeter's accessible label is more stable than generated CSS classes.
@@ -62,17 +60,17 @@ export function dockContextControl(element: HTMLElement): { show(value: boolean)
       if (meter) original = { value: meter.style.getPropertyValue("display"), priority: meter.style.getPropertyPriority("display") };
     }
     if (meter?.parentElement) {
-      if (!inNativeSlot) { fallback.show(false); element.style.cssText = initialStyle; inNativeSlot = true; }
+      fallback(false); element.style.cssText = initialStyle;
       if (element.nextSibling !== meter) meter.before(element);
       meter.style.setProperty("display", "none", "important");
-    } else { inNativeSlot = false; fallback.show(true); }
+    } else fallback(true);
   }
-  function schedule(): void { if (frame === undefined) frame = requestAnimationFrame(place); }
+  function schedule(): void { if (wanted && frame === undefined) frame = requestAnimationFrame(place); }
   const observer = new MutationObserver(schedule);
   observer.observe(document.body, { childList: true, subtree: true });
   return {
     show(value) { wanted = value; place(); },
-    dispose() { observer.disconnect(); if (frame !== undefined) cancelAnimationFrame(frame); restore(); fallback.dispose(); },
+    dispose() { wanted = false; observer.disconnect(); if (frame !== undefined) cancelAnimationFrame(frame); restore(); fallback(false); element.remove(); },
   };
 }
 

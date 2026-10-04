@@ -68,7 +68,7 @@
     for (const [used, text, color] of [[40000, "☀ Clear", "yellow"], [50000, "☁ Cloudy", "cyan"], [120000, "☂ Showers", "blue"], [178000, "☇ Storm", "magenta"], [180000, "↯ Compact soon", "red"]]) {
       measure(used); await shows(text, "weather bin"); assert(tone() === color, `${text} uses ${color}`);
     }
-    assert(dock().nextElementSibling === form && !form.contains(dock()) && !document.querySelector('[data-testid="composer-editor"]').contains(dock()), "Band is above the composer and outside the editor");
+    assert(dock().parentElement.nextElementSibling === form && !form.contains(dock()) && !document.querySelector('[data-testid="composer-editor"]').contains(dock()), "Band is above the composer and outside the editor");
     assert(bandText().includes("90%") && bandText().includes("180k / 200k"), "Percent and measured tokens shown"); results.push("measured weather bins and tones");
     measure(36100, { complete: true }); await shows("36.1k / 200k", "first completed turn");
     assert(!/unknown|first turn|last turn|Δ/.test(bandText()), "First turn omits delta placeholders");
@@ -89,8 +89,8 @@
     history.pushState({}, "", "/local/thread-a"); await shows("window size unavailable", "route back");
     assert(sparkline().length === 0, "No sparkline bar"); results.push("unknown window, thread filtering, and route refresh");
     const replacement = form.cloneNode(true); form.replaceWith(replacement);
-    await wait(() => dock()?.nextElementSibling === replacement, "reattach after React rerender");
-    dock().remove(); await wait(() => dock()?.nextElementSibling === replacement, "reattach after removal"); results.push("band reattaches after rerenders");
+    await wait(() => dock()?.parentElement?.nextElementSibling === replacement, "reattach after React rerender");
+    dock().parentElement.remove(); await wait(() => dock()?.parentElement?.nextElementSibling === replacement, "reattach after removal"); results.push("band reattaches after rerenders");
     window.__modsForT3Code.open(); shadow().querySelector('input[aria-label="Enable Token weather"]').click();
     await wait(() => !dock() && !shadow().querySelector('input[aria-label="Enable Token weather"]').disabled, "band hot cleanup");
     shadow().querySelector('input[aria-label="Enable Token weather"]').click();

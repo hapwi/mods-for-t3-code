@@ -7,6 +7,11 @@
     while (!test()) { if (Date.now() > deadline) throw new Error(`Timed out: ${label}`); await new Promise(resolve => setTimeout(resolve, 30)); }
   };
   const assert = (value, label) => { if (!value) throw new Error(label); };
+  const pointerClick = async target => {
+    const box = target.getBoundingClientRect();
+    window.__contextUsageInput = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+    await wait(() => !window.__contextUsageInput, "mouse click");
+  };
   const manager = () => document.querySelector("#mods-for-t3-code-host")?.shadowRoot;
   const control = () => document.querySelector('[data-t3mods="context"]')?.shadowRoot;
   const weather = () => document.querySelector('[data-t3mods="bands"]')?.shadowRoot.querySelector('[data-mod="token-weather"]')?.textContent ?? "";
@@ -35,7 +40,7 @@
     await wait(() => control()?.querySelector(".context-percent")?.textContent === "90%", "measured ring");
     const root = document.querySelector('[data-t3mods="context"]');
     assert(root.nextElementSibling === native && native.style.display === "none", "Ring replaces native meter footprint");
-    control().querySelector(".context-trigger").click();
+    await pointerClick(control().querySelector(".context-percent"));
     await wait(() => control().querySelector(".context-popup:popover-open"), "open inspector");
     assert(control().textContent.includes("229.9K / 256K Tokens"), "Measured total");
     assert(control().querySelectorAll(".context-unavailable").length === 7, "Missing categories unavailable");
@@ -45,8 +50,7 @@
     measure({ breakdown: { systemPrompt: 2400, toolDefinitions: 9800, rules: 31900, skills: 5000, mcpTools: 5900, summarizedConversation: 10300, conversation: 164600 } });
     await wait(() => control().querySelectorAll(".context-segment").length === 7, "category segments");
     assert(popup.matches(":popover-open") && control().textContent.includes("164.6K"), "Open panel updates live");
-    if (capture) { output.dataset.status = "capture"; await wait(() => window.__contextUsageContinue, "visual capture"); output.dataset.status = "running"; }
-    control().querySelector('[aria-label="Close context usage"]').click();
+    await pointerClick(control().querySelector('[aria-label="Close context usage"]'));
     await wait(() => !popup.matches(":popover-open"), "close inspector");
     control().querySelector(".context-trigger").click();
     history.pushState({}, "", "/local/empty-thread");
@@ -69,17 +73,39 @@
     window.__modsForT3Code.open("examples");
     [...manager().querySelectorAll('[data-example="token-weather"] button')].find(item => item.textContent === "Review").click(); click("Install mod");
     await wait(() => manager().querySelector('[aria-label="Enable Token weather"]:checked'), "weather installed");
+    await wait(() => manager().querySelector('[data-mod="token-weather"] [data-state="active"]'), "weather worker ready");
     click("Close");
     measure({ usedTokens: 24300, maxTokens: 258400, complete: true });
     await wait(() => weather().includes("24.3k / 258.4k"), "weather totals");
     measure({ turnId: "turn-b", usedTokens: 24976, maxTokens: 258400, complete: true });
     await wait(() => weather().includes("+676 last turn"), "weather delta");
     assert(!/[▁▂▃▄▅▆▇█]/.test(weather()), "No sparkline bar");
+    window.__modsForT3Code.open("installed");
+    manager().querySelector('[aria-label="Enable Context Usage"]').click();
+    await wait(() => control(), "context re-enabled beside weather");
+    await wait(() => !manager().querySelector('[aria-label="Enable Context Usage"]').disabled, "context enable settled");
+    click("Close");
+    // Match the native floating layout and remove the recognized meter to exercise the fallback.
+    const surface = form.querySelector('[data-chat-composer-surface]');
+    const relative = document.createElement("div"); relative.style.position = "relative";
+    surface.before(relative); relative.append(surface);
+    surface.setAttribute("data-chat-composer-main-surface", "true");
+    native.remove();
+    await wait(() => document.querySelector('[data-t3mods="context"]') && document.querySelector('[data-t3mods="bands"]'), "both fallback controls");
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const ringBox = control().querySelector(".context-widget").getBoundingClientRect();
+    const bandBox = document.querySelector('[data-t3mods="bands"]').shadowRoot.querySelector(".band").getBoundingClientRect();
+    assert(ringBox.right <= bandBox.left || ringBox.bottom <= bandBox.top, "Context Usage and Token Weather do not overlap");
+    await pointerClick(control().querySelector(".context-trigger"));
+    await wait(() => control()?.querySelector(".context-popup:popover-open"), "real pointer opens fallback inspector");
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert(control().querySelector(".context-popup:popover-open"), "Fallback inspector stays open beside Token Weather");
+    if (capture) { output.dataset.status = "capture"; await wait(() => window.__contextUsageContinue, "visual capture"); output.dataset.status = "running"; }
     assert((await fetch("/favicon.ico")).headers.get("Content-Type") === "image/vnd.microsoft.icon", "Favicon served");
     await window.__modsForT3Code.dispose();
     assert(!document.querySelector('[data-t3mods="context"]') && !document.querySelector("iframe"), "Host cleanup");
     output.dataset.status = "passed";
-    output.textContent = "Context Usage passed: two built-ins, real-worker installation, native slot/restoration, clickable live breakdown, missing categories/window, thread switching, cleanup, Token Weather without sparkline, and favicon serving.";
+    output.textContent = "Context Usage passed: real-worker installation, native slot/restoration, live breakdown, missing categories/window, thread switching, combined fallback without overlap, real pointer opens inspector, cleanup, and Token Weather without sparkline.";
   } catch (error) {
     output.dataset.status = "failed"; output.textContent = (error.stack || String(error)) + "\nManager: " + manager()?.textContent.slice(-1500);
   }
